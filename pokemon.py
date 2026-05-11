@@ -107,4 +107,4 @@ if __name__ == "__main__":
         pokemon_name = fetch_random_pokemon(total_pokemon)
         
         if pokemon_name:
-            user_input = input("Press [C] to check top card prices, [ENTER] to catch another, or 'q
+            user_input = input("Press [C] to check top card prices, [ENTER] to catch another, or 'q' to quit: ").strip().lower()
