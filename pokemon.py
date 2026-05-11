@@ -12,10 +12,9 @@ def get_total_pokemon():
     return 1025
 
 def get_top_cards(pokemon_name, top_n=5):
-    """Fetches the top English cards for a given Pokémon based on TCGplayer market price."""
+    """Fetches the top English cards for a given Pokémon based on TCGplayer market price, including URLs."""
     print(f"\nScanning TCGplayer data for the most expensive {pokemon_name} cards...")
     
-    # The Pokémon TCG API defaults to standard English/International sets
     api_url = "https://api.pokemontcg.io/v2/cards"
     params = {"q": f'name:"{pokemon_name}"'}
     
@@ -26,14 +25,15 @@ def get_top_cards(pokemon_name, top_n=5):
             
             card_prices = []
             for card in cards:
-                # Extract TCGplayer pricing data
                 tcgplayer = card.get('tcgplayer', {})
                 prices = tcgplayer.get('prices', {})
+                
+                # Extract the direct TCGplayer URL (defaulting to a message if missing)
+                store_url = tcgplayer.get('url', 'No link available')
                 
                 if not prices:
                     continue
                     
-                # Find the highest market price among different variants (holofoil, normal, 1st edition, etc.)
                 highest_price = 0
                 for price_type, price_data in prices.items():
                     market_price = price_data.get('market', 0)
@@ -45,10 +45,10 @@ def get_top_cards(pokemon_name, top_n=5):
                         'name': card.get('name', pokemon_name),
                         'set': card.get('set', {}).get('name', 'Unknown Set'),
                         'price': highest_price,
-                        'number': card.get('number', 'N/A')
+                        'number': card.get('number', 'N/A'),
+                        'url': store_url
                     })
             
-            # Sort the list by price, descending
             card_prices.sort(key=lambda x: x['price'], reverse=True)
             
             print(f"\n--- Top {top_n} Most Valuable English Cards for {pokemon_name} ---")
@@ -56,8 +56,10 @@ def get_top_cards(pokemon_name, top_n=5):
                 print("No pricing data found.")
             else:
                 for i, card in enumerate(card_prices[:top_n], 1):
-                    print(f"{i}. {card['name']} - {card['set']} (#{card['number']}) | ${card['price']:.2f}")
-            print("----------------------------------------------------------------")
+                    print(f"\n{i}. {card['name']} - {card['set']} (#{card['number']})")
+                    print(f"   Price: ${card['price']:.2f}")
+                    print(f"   Link:  {card['url']}")
+            print("\n----------------------------------------------------------------")
             
         else:
             print("Error: Could not retrieve card data from the TCG API.")
@@ -76,7 +78,6 @@ def fetch_random_pokemon(max_id):
         if response.status_code == 200:
             data = response.json()
             
-            # Use species name and format it to handle names like "mr-mime" for better TCG searching
             pokemon_name = data['species']['name'].replace('-', ' ').title()
             types = [t['type']['name'].capitalize() for t in data['types']]
             types_str = "/".join(types)
@@ -106,20 +107,4 @@ if __name__ == "__main__":
         pokemon_name = fetch_random_pokemon(total_pokemon)
         
         if pokemon_name:
-            # New input logic to handle card checking
-            user_input = input("Press [C] to check top card prices, [ENTER] to catch another, or 'q' to quit: ").strip().lower()
-            
-            if user_input == 'c':
-                get_top_cards(pokemon_name)
-                # Ask again after displaying the cards
-                post_card_input = input("\nPress [ENTER] to catch another, or 'q' to quit: ").strip().lower()
-                if post_card_input == 'q':
-                    print("Closing Pokédex. Goodbye!")
-                    break
-            elif user_input == 'q':
-                print("Closing Pokédex. Goodbye!")
-                break
-        else:
-            retry = input("Press [ENTER] to try again, or 'q' to quit: ").strip().lower()
-            if retry == 'q':
-                break
+            user_input = input("Press [C] to check top card prices, [ENTER] to catch another, or 'q
