@@ -1,5 +1,8 @@
+import streamlit as st
 import random
 import requests
+
+# --- API Functions ---
 
 def get_total_pokemon():
     """Fetches the current total number of Pokémon species."""
@@ -11,42 +14,50 @@ def get_total_pokemon():
         pass
     return 1025
 
-def get_top_cards(pokemon_name, top_n=5):
-    """Fetches the top English cards for a given Pokémon based on TCGplayer market price, including URLs."""
-    print(f"\nScanning TCGplayer data for the most expensive {pokemon_name} cards...")
+def fetch_random_pokemon(max_id):
+    """Fetches a random Pokémon, its types, and its official sprite image."""
+    random_id = random.randint(1, max_id)
+    api_url = f"https://pokeapi.co/api/v2/pokemon/{random_id}"
     
-    # Adding a User-Agent helps bypass blocks from cloud environments like Codespaces
+    try:
+        response = requests.get(api_url)
+        if response.status_code == 200:
+            data = response.json()
+            
+            pokemon_name = data['species']['name'].replace('-', ' ').title()
+            types = [t['type']['name'].capitalize() for t in data['types']]
+            # Get the official artwork sprite
+            sprite_url = data['sprites']['other']['official-artwork']['front_default']
+            
+            return {
+                "name": pokemon_name,
+                "id": random_id,
+                "types": "/".join(types),
+                "sprite": sprite_url
+            }
+    except requests.exceptions.RequestException:
+        return None
+
+def get_tcg_cards(pokemon_name, top_n=5):
+    """Fetches top English cards and their images from the Pokémon TCG API."""
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     api_url = "https://api.pokemontcg.io/v2/cards"
     params = {"q": f'name:"{pokemon_name}"'}
     
     try:
         response = requests.get(api_url, headers=headers, params=params)
-        
-        # Check exactly what the API is telling us
         if response.status_code != 200:
-            print(f"Error: The API returned Status Code {response.status_code}.")
-            if response.status_code in [403, 429]:
-                print("Note: The Pokémon TCG API is blocking the request. (Are you in Codespaces?)")
-            return
+            return None
 
         cards = response.json().get('data', [])
-        if not cards:
-            print(f"No cards found for {pokemon_name} in the database.")
-            return
-            
         card_prices = []
+        
         for card in cards:
             tcgplayer = card.get('tcgplayer', {})
             prices = tcgplayer.get('prices', {})
-            store_url = tcgplayer.get('url', 'No link available')
             
-            if not prices:
-                continue
-                
             highest_price = 0
             for price_type, price_data in prices.items():
-                # Safely handle 'null' (None) market prices from the API
                 market_price = price_data.get('market')
                 if market_price is not None and market_price > highest_price:
                     highest_price = market_price
@@ -56,77 +67,90 @@ def get_top_cards(pokemon_name, top_n=5):
                     'name': card.get('name', pokemon_name),
                     'set': card.get('set', {}).get('name', 'Unknown Set'),
                     'price': highest_price,
-                    'number': card.get('number', 'N/A'),
-                    'url': store_url
+                    'image': card.get('images', {}).get('small', ''),
+                    'url': tcgplayer.get('url', '#')
                 })
-        
+                
         card_prices.sort(key=lambda x: x['price'], reverse=True)
-        
-        print(f"\n--- Top {top_n} Most Valuable English Cards for {pokemon_name} ---")
-        if not card_prices:
-            print("Pricing data is currently missing or unavailable for these cards.")
-        else:
-            for i, card in enumerate(card_prices[:top_n], 1):
-                print(f"\n{i}. {card['name']} - {card['set']} (#{card['number']})")
-                print(f"   Price: ${card['price']:.2f}")
-                print(f"   Link:  {card['url']}")
-        print("\n----------------------------------------------------------------")
-        
-    except requests.exceptions.RequestException as e:
-        print(f"An error occurred fetching card data: {e}")
+        return card_prices[:top_n]
+    except requests.exceptions.RequestException:
+        return None
 
-def fetch_random_pokemon(max_id):
-    """Fetches a random Pokémon and returns its cleaned name."""
-    random_id = random.randint(1, max_id)
-    api_url = f"https://pokeapi.co/api/v2/pokemon/{random_id}"
+def check_ebay_sold_listings(card_name, set_name):
+    """
+    Template for eBay API integration to check actual sold prices.
+    You will need to insert your eBay OAuth token and App ID here.
+    """
+    # 1. You will need an OAuth access token from your eBay Developer Account
+    oauth_token = "YOUR_EBAY_OAUTH_TOKEN_HERE" 
     
-    try:
-        response = requests.get(api_url)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            pokemon_name = data['species']['name'].replace('-', ' ').title()
-            types = [t['type']['name'].capitalize() for t in data['types']]
-            types_str = "/".join(types)
-            
-            print("\n================================")
-            print("✨ A WILD POKÉMON APPEARED! ✨")
-            print("================================")
-            print(f"Name:     {pokemon_name} (# {random_id})")
-            print(f"Type:     {types_str}")
-            print("================================\n")
-            
-            return pokemon_name
-            
-        else:
-            print(f"Error: Could not retrieve data (Status Code: {response.status_code})")
-            
-    except requests.exceptions.RequestException as e:
-        print(f"An error occurred: {e}")
-        
-    return None
+    # 2. Setup the headers for the eBay Browse API
+    headers = {
+        "Authorization": f"Bearer {oauth_token}",
+        "Content-Type": "application/json",
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
+    }
+    
+    # 3. Formulate the search query (e.g., "Charizard Base Set PSA")
+    search_query = f"{card_name} {set_name} Pokemon"
+    
+    # 4. Make the request to the eBay API (Endpoint example for searching items)
+    # url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={search_query}&filter=itemEndDate:[..now]"
+    # response = requests.get(url, headers=headers)
+    # Parse status codes and JSON response here to find the average sold price.
+    
+    # Returning a placeholder string until credentials are added
+    return "eBay API integration pending OAuth setup"
 
-if __name__ == "__main__":
-    print("Initializing Pokédex...")
-    total_pokemon = get_total_pokemon()
+# --- Streamlit UI ---
+
+st.set_page_config(page_title="Pokémon Card Tracker", layout="wide")
+
+st.title("⚡ Pokémon Card Market Dashboard")
+st.write("Generate a random Pokémon and check its top TCGplayer market prices.")
+
+# Session state keeps the Pokémon on the screen when we click other buttons
+if 'current_pokemon' not in st.session_state:
+    st.session_state.current_pokemon = None
+
+if st.button("Catch a Random Pokémon", type="primary"):
+    with st.spinner("Searching the tall grass..."):
+        total_pokemon = get_total_pokemon()
+        st.session_state.current_pokemon = fetch_random_pokemon(total_pokemon)
+
+if st.session_state.current_pokemon:
+    pokemon = st.session_state.current_pokemon
     
-    while True:
-        pokemon_name = fetch_random_pokemon(total_pokemon)
+    # Display the Pokémon using columns
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        if pokemon['sprite']:
+            st.image(pokemon['sprite'], width=200)
+    with col2:
+        st.header(f"{pokemon['name']} (# {pokemon['id']})")
+        st.subheader(f"Type: {pokemon['types']}")
         
-        if pokemon_name:
-            user_input = input("Press [C] to check top card prices, [ENTER] to catch another, or 'q' to quit: ").strip().lower()
-            
-            if user_input == 'c':
-                get_top_cards(pokemon_name)
-                post_card_input = input("\nPress [ENTER] to catch another, or 'q' to quit: ").strip().lower()
-                if post_card_input == 'q':
-                    print("Closing Pokédex. Goodbye!")
-                    break
-            elif user_input == 'q':
-                print("Closing Pokédex. Goodbye!")
-                break
+    st.divider()
+    
+    st.subheader(f"Top Valuable Cards for {pokemon['name']}")
+    with st.spinner("Pulling data from TCGplayer..."):
+        top_cards = get_tcg_cards(pokemon['name'])
+        
+        if not top_cards:
+            st.warning("No pricing data found for this Pokémon.")
         else:
-            retry = input("Press [ENTER] to try again, or 'q' to quit: ").strip().lower()
-            if retry == 'q':
-                break
+            # Create a grid of cards
+            card_columns = st.columns(len(top_cards))
+            
+            for idx, card in enumerate(top_cards):
+                with card_columns[idx]:
+                    if card['image']:
+                        st.image(card['image'], use_container_width=True)
+                    st.write(f"**{card['set']}**")
+                    st.write(f"TCG Market: **${card['price']:.2f}**")
+                    
+                    # eBay Integration Call (Placeholder)
+                    ebay_status = check_ebay_sold_listings(card['name'], card['set'])
+                    st.caption(f"*eBay:* {ebay_status}")
+                    
+                    st.link_button("View on TCGplayer", card['url'])
