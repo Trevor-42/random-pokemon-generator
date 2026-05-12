@@ -83,7 +83,7 @@ def get_tcg_cards(pokemon_name, top_n=5):
 
 def check_ebay_sold_listings(card_name, set_name):
     """Template for eBay API integration to check actual sold prices."""
-    oauth_token = "YOUR_EBAY_OAUTH_TOKEN_HERE" 
+    oauth_token = st.secrets["EBAY_OAUTH_TOKEN"]
     headers = {
         "Authorization": f"Bearer {oauth_token}",
         "Content-Type": "application/json",
