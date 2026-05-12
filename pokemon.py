@@ -16,7 +16,6 @@ def get_total_pokemon():
 
 def fetch_pokemon_data(identifier):
     """Fetches a Pokémon by ID (number) or Name (string)."""
-    # Clean the input for the API (lowercase, replace spaces with hyphens)
     clean_id = str(identifier).strip().lower().replace(" ", "-")
     api_url = f"https://pokeapi.co/api/v2/pokemon/{clean_id}"
     
@@ -25,7 +24,6 @@ def fetch_pokemon_data(identifier):
         if response.status_code == 200:
             data = response.json()
             
-            # Format the name nicely for the UI
             pokemon_name = data['species']['name'].replace('-', ' ').title()
             types = [t['type']['name'].capitalize() for t in data['types']]
             sprite_url = data['sprites']['other']['official-artwork']['front_default']
@@ -117,7 +115,6 @@ with col1:
 
 with col2:
     st.subheader("Look Up Pokémon")
-    # Form prevents the page from refreshing on every keystroke
     with st.form("search_form"):
         search_query = st.text_input("Enter a Pokémon name (e.g., Charizard, Lugia):", label_visibility="collapsed", placeholder="Enter a Pokémon name...")
         submitted = st.form_submit_button("Search", use_container_width=True)
@@ -132,11 +129,9 @@ st.divider()
 if st.session_state.current_pokemon:
     pokemon = st.session_state.current_pokemon
     
-    # Handle typos or bad searches
     if pokemon.get("error"):
         st.error(pokemon["error"])
     else:
-        # Display the Pokémon
         poke_col1, poke_col2 = st.columns([1, 3])
         with poke_col1:
             if pokemon['sprite']:
@@ -158,8 +153,12 @@ if st.session_state.current_pokemon:
                     with card_columns[idx]:
                         if card['image']:
                             st.image(card['image'], use_container_width=True)
-                        st.write(f"**")
+                        
+                        # --- THIS IS THE NEW SECTION ---
+                        st.markdown(f"**{card['name']}**") # Adds the specific card name
+                        st.caption(f"Set: {card['set']}")  # Makes the set name a bit smaller/cleaner
                         st.write(f"TCG Market: **${card['price']:.2f}**")
+                        # -------------------------------
                         
                         ebay_status = check_ebay_sold_listings(card['name'], card['set'])
                         st.caption(f"*eBay:* {ebay_status}")
