@@ -18,18 +18,24 @@ st.set_page_config(page_title="Pokémon Card Tracker", layout="wide")
 # --- eBay OAuth Helpers ---
 
 def get_ebay_auth_url():
+    client_id = st.secrets.get("EBAY_CLIENT_ID")
+    redirect_uri = st.secrets.get("EBAY_REDIRECT_URI")
+    if not client_id or not redirect_uri:
+        return None
     params = {
-        "client_id": st.secrets["EBAY_CLIENT_ID"],
-        "redirect_uri": st.secrets["EBAY_REDIRECT_URI"],  # your eBay RuName
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": EBAY_SCOPES,
     }
     return f"{EBAY_AUTH_URL}?{urlencode(params)}"
 
 def exchange_code_for_token(code):
-    client_id = st.secrets["EBAY_CLIENT_ID"]
-    client_secret = st.secrets["EBAY_CLIENT_SECRET"]
-    redirect_uri = st.secrets["EBAY_REDIRECT_URI"]
+    client_id = st.secrets.get("EBAY_CLIENT_ID")
+    client_secret = st.secrets.get("EBAY_CLIENT_SECRET")
+    redirect_uri = st.secrets.get("EBAY_REDIRECT_URI")
+    if not client_id or not client_secret or not redirect_uri:
+        return None
 
     encoded = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     response = requests.post(
@@ -228,7 +234,10 @@ else:
         st.warning("⚠️ eBay not connected — sold price data unavailable")
     with col_connect:
         auth_url = get_ebay_auth_url()
-        st.link_button("Connect eBay", auth_url, type="primary")
+        if auth_url:
+            st.link_button("Connect eBay", auth_url, type="primary")
+        else:
+            st.caption("Add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REDIRECT_URI to secrets")
 
 if 'current_pokemon' not in st.session_state:
     st.session_state.current_pokemon = None
