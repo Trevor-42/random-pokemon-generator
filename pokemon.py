@@ -2,8 +2,109 @@ import streamlit as st
 import random
 import requests
 import base64
+from urllib.parse import urlencode
 
-# --- API Functions ---
+# --- eBay OAuth Config ---
+EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
+EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+EBAY_SCOPES = " ".join([
+    "https://api.ebay.com/oauth/api_scope",
+    "https://api.ebay.com/oauth/api_scope/buy.marketplace.insights",
+])
+
+# --- Page Config (must be first) ---
+st.set_page_config(page_title="Pokémon Card Tracker", layout="wide")
+
+# --- eBay OAuth Helpers ---
+
+def get_ebay_auth_url():
+    params = {
+        "client_id": st.secrets["EBAY_CLIENT_ID"],
+        "redirect_uri": st.secrets["EBAY_REDIRECT_URI"],  # your eBay RuName
+        "response_type": "code",
+        "scope": EBAY_SCOPES,
+    }
+    return f"{EBAY_AUTH_URL}?{urlencode(params)}"
+
+def exchange_code_for_token(code):
+    client_id = st.secrets["EBAY_CLIENT_ID"]
+    client_secret = st.secrets["EBAY_CLIENT_SECRET"]
+    redirect_uri = st.secrets["EBAY_REDIRECT_URI"]
+
+    encoded = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    response = requests.post(
+        EBAY_TOKEN_URL,
+        headers={
+            "Authorization": f"Basic {encoded}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+        },
+    )
+    if response.status_code == 200:
+        return response.json()
+    st.error(f"eBay token exchange failed ({response.status_code}): {response.text}")
+    return None
+
+def refresh_ebay_token(refresh_token):
+    client_id = st.secrets["EBAY_CLIENT_ID"]
+    client_secret = st.secrets["EBAY_CLIENT_SECRET"]
+
+    encoded = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    response = requests.post(
+        EBAY_TOKEN_URL,
+        headers={
+            "Authorization": f"Basic {encoded}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "scope": EBAY_SCOPES,
+        },
+    )
+    if response.status_code == 200:
+        return response.json()
+    return None
+
+def get_ebay_token():
+    """Returns a valid access token from session_state, refreshing if needed."""
+    if "ebay_access_token" not in st.session_state:
+        return None
+
+    # Try to refresh if we have a refresh token stored
+    if st.session_state.get("ebay_token_expired"):
+        refresh_token = st.session_state.get("ebay_refresh_token")
+        if refresh_token:
+            token_data = refresh_ebay_token(refresh_token)
+            if token_data:
+                st.session_state.ebay_access_token = token_data["access_token"]
+                st.session_state.ebay_token_expired = False
+                if "refresh_token" in token_data:
+                    st.session_state.ebay_refresh_token = token_data["refresh_token"]
+            else:
+                # Refresh failed — clear tokens and re-auth
+                del st.session_state["ebay_access_token"]
+                return None
+
+    return st.session_state.get("ebay_access_token")
+
+# --- Handle OAuth Callback (eBay redirects back with ?code=...) ---
+query_params = st.query_params
+if "code" in query_params and "ebay_access_token" not in st.session_state:
+    with st.spinner("Connecting to eBay..."):
+        token_data = exchange_code_for_token(query_params["code"])
+        if token_data:
+            st.session_state.ebay_access_token = token_data["access_token"]
+            st.session_state.ebay_refresh_token = token_data.get("refresh_token")
+            st.session_state.ebay_token_expired = False
+            st.query_params.clear()
+            st.rerun()
+
+# --- Pokémon API Functions ---
 
 def get_total_pokemon():
     try:
@@ -16,10 +117,8 @@ def get_total_pokemon():
 
 def fetch_pokemon_data(identifier):
     clean_id = str(identifier).strip().lower().replace(" ", "-")
-    api_url = f"https://pokeapi.co/api/v2/pokemon/{clean_id}"
-
     try:
-        response = requests.get(api_url)
+        response = requests.get(f"https://pokeapi.co/api/v2/pokemon/{clean_id}")
         if response.status_code == 200:
             data = response.json()
             pokemon_name = data['species']['name'].replace('-', ' ').title()
@@ -39,24 +138,25 @@ def fetch_pokemon_data(identifier):
     except requests.exceptions.RequestException:
         return {"error": "Connection error to PokéAPI."}
 
+@st.cache_data(ttl=3600)
 def get_tcg_cards(pokemon_name, top_n=5):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    api_url = "https://api.pokemontcg.io/v2/cards"
-    params = {"q": f'name:"{pokemon_name}"'}
-
     try:
-        response = requests.get(api_url, headers=headers, params=params)
+        response = requests.get(
+            "https://api.pokemontcg.io/v2/cards",
+            headers=headers,
+            params={"q": f'name:"{pokemon_name}"'},
+        )
         if response.status_code != 200:
             return None
 
         cards = response.json().get('data', [])
         card_prices = []
-
         for card in cards:
             tcgplayer = card.get('tcgplayer', {})
             prices = tcgplayer.get('prices', {})
             highest_price = 0
-            for price_type, price_data in prices.items():
+            for price_data in prices.values():
                 market_price = price_data.get('market')
                 if market_price is not None and market_price > highest_price:
                     highest_price = market_price
@@ -73,39 +173,7 @@ def get_tcg_cards(pokemon_name, top_n=5):
     except requests.exceptions.RequestException:
         return None
 
-# --- eBay OAuth (Client Credentials — app token, no user login required) ---
-
-@st.cache_data(ttl=7000)
-def get_ebay_access_token():
-    client_id = st.secrets.get("EBAY_CLIENT_ID")
-    client_secret = st.secrets.get("EBAY_CLIENT_SECRET")
-    if not client_id or not client_secret:
-        return None
-
-    encoded = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-    response = requests.post(
-        "https://api.ebay.com/identity/v1/oauth2/token",
-        headers={
-            "Authorization": f"Basic {encoded}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        data={
-            "grant_type": "client_credentials",
-            "scope": "https://api.ebay.com/oauth/api_scope",
-        },
-    )
-    if response.status_code == 200:
-        return response.json().get("access_token")
-    # Surface the real error so it's visible in the app
-    st.error(f"eBay Auth Failed ({response.status_code}): {response.text}")
-    return None
-
-@st.cache_data(ttl=3600)
-def check_ebay_sold_listings(card_name, set_name):
-    token = get_ebay_access_token()
-    if not token:
-        return None
-
+def check_ebay_sold_listings(card_name, set_name, token):
     query = f"{card_name} {set_name} Pokemon card"
     response = requests.get(
         "https://api.ebay.com/buy/marketplace_insights/v1_beta/item_sales/search",
@@ -116,20 +184,18 @@ def check_ebay_sold_listings(card_name, set_name):
         params={"q": query, "limit": 10},
     )
 
+    if response.status_code == 401:
+        st.session_state.ebay_token_expired = True
+        return None
     if response.status_code != 200:
         return None
 
     sales = response.json().get("itemSales", [])
-    if not sales:
-        return None
-
-    prices = []
-    for sale in sales:
-        sold_price = sale.get("lastSoldPrice", {})
-        value = sold_price.get("value")
-        if value:
-            prices.append(float(value))
-
+    prices = [
+        float(sale["lastSoldPrice"]["value"])
+        for sale in sales
+        if sale.get("lastSoldPrice", {}).get("value")
+    ]
     if not prices:
         return None
 
@@ -140,26 +206,35 @@ def check_ebay_sold_listings(card_name, set_name):
         "high": max(prices),
     }
 
-# --- Streamlit UI ---
-
-st.set_page_config(page_title="Pokémon Card Tracker", layout="wide")
+# --- UI ---
 
 st.title("⚡ Pokémon Card Market Dashboard")
 st.write("Search for a specific Pokémon or catch a random one to check its top TCGplayer market prices.")
 
-# Show eBay connection status once at the top
-ebay_token = get_ebay_access_token()
+# eBay connection banner
+ebay_token = get_ebay_token()
 if ebay_token:
-    st.success("✅ eBay API connected")
+    col_status, col_disconnect = st.columns([4, 1])
+    with col_status:
+        st.success("✅ eBay account connected")
+    with col_disconnect:
+        if st.button("Disconnect eBay"):
+            for key in ["ebay_access_token", "ebay_refresh_token", "ebay_token_expired"]:
+                st.session_state.pop(key, None)
+            st.rerun()
 else:
-    st.warning("⚠️ eBay API not connected — add EBAY_CLIENT_ID and EBAY_CLIENT_SECRET to secrets.toml")
+    col_status, col_connect = st.columns([4, 1])
+    with col_status:
+        st.warning("⚠️ eBay not connected — sold price data unavailable")
+    with col_connect:
+        auth_url = get_ebay_auth_url()
+        st.link_button("Connect eBay", auth_url, type="primary")
 
 if 'current_pokemon' not in st.session_state:
     st.session_state.current_pokemon = None
 
-# --- Top Control Panel ---
+# --- Search Controls ---
 col1, col2 = st.columns(2)
-
 with col1:
     st.subheader("Surprise Me!")
     if st.button("Catch a Random Pokémon", type="primary", use_container_width=True):
@@ -179,7 +254,7 @@ with col2:
 
 st.divider()
 
-# --- Display Results ---
+# --- Results ---
 if st.session_state.current_pokemon:
     pokemon = st.session_state.current_pokemon
 
@@ -202,18 +277,16 @@ if st.session_state.current_pokemon:
                 st.warning("No pricing data found for this Pokémon.")
             else:
                 card_columns = st.columns(len(top_cards))
-
                 for idx, card in enumerate(top_cards):
                     with card_columns[idx]:
                         if card['image']:
                             st.image(card['image'], use_container_width=True)
-
                         st.markdown(f"**{card['name']}**")
                         st.caption(f"Set: {card['set']}")
                         st.write(f"TCG Market: **${card['price']:.2f}**")
 
                         if ebay_token:
-                            ebay_data = check_ebay_sold_listings(card['name'], card['set'])
+                            ebay_data = check_ebay_sold_listings(card['name'], card['set'], ebay_token)
                             if ebay_data:
                                 st.caption(
                                     f"eBay Sold ({ebay_data['count']} sales): "
@@ -223,6 +296,6 @@ if st.session_state.current_pokemon:
                             else:
                                 st.caption("eBay: No recent sales found")
                         else:
-                            st.caption("eBay: not connected")
+                            st.caption("eBay: Connect above to see sold prices")
 
                         st.link_button("View on TCGplayer", card['url'])
