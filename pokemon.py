@@ -96,6 +96,8 @@ def get_ebay_access_token():
     )
     if response.status_code == 200:
         return response.json().get("access_token")
+    # Surface the real error so it's visible in the app
+    st.error(f"eBay Auth Failed ({response.status_code}): {response.text}")
     return None
 
 @st.cache_data(ttl=3600)
