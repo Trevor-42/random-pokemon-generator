@@ -1,0 +1,13 @@
+# Python cache files (created automatically when Python runs)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments (if you ever run this locally)
+venv/
+env/
+
+# Environment variables and Secrets (CRITICAL for your eBay token)
+.env
+.streamlit/
+secrets.toml
