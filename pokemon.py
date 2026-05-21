@@ -56,8 +56,10 @@ def exchange_code_for_token(code):
     return None
 
 def refresh_ebay_token(refresh_token):
-    client_id = st.secrets["EBAY_CLIENT_ID"]
-    client_secret = st.secrets["EBAY_CLIENT_SECRET"]
+    client_id = st.secrets.get("EBAY_CLIENT_ID")
+    client_secret = st.secrets.get("EBAY_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return None
 
     encoded = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     response = requests.post(
@@ -112,6 +114,7 @@ if "code" in query_params and "ebay_access_token" not in st.session_state:
 
 # --- Pokémon API Functions ---
 
+@st.cache_data(ttl=86400)
 def get_total_pokemon():
     try:
         response = requests.get("https://pokeapi.co/api/v2/pokemon-species/")
@@ -121,6 +124,7 @@ def get_total_pokemon():
         pass
     return 1025
 
+@st.cache_data(ttl=3600)
 def fetch_pokemon_data(identifier):
     clean_id = str(identifier).strip().lower().replace(" ", "-")
     try:
@@ -181,14 +185,17 @@ def get_tcg_cards(pokemon_name, top_n=5):
 
 def check_ebay_sold_listings(card_name, set_name, token):
     query = f"{card_name} {set_name} Pokemon card"
-    response = requests.get(
-        "https://api.ebay.com/buy/marketplace_insights/v1_beta/item_sales/search",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        },
-        params={"q": query, "limit": 10},
-    )
+    try:
+        response = requests.get(
+            "https://api.ebay.com/buy/marketplace_insights/v1_beta/item_sales/search",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+            },
+            params={"q": query, "limit": 10},
+        )
+    except requests.exceptions.RequestException:
+        return None
 
     if response.status_code == 401:
         st.session_state.ebay_token_expired = True
