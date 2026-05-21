@@ -7,10 +7,7 @@ from urllib.parse import urlencode
 # --- eBay OAuth Config ---
 EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
 EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
-EBAY_SCOPES = " ".join([
-    "https://api.ebay.com/oauth/api_scope",
-    "https://api.ebay.com/oauth/api_scope/buy.marketplace.insights",
-])
+EBAY_SCOPES = "https://api.ebay.com/oauth/api_scope"
 
 # --- Page Config (must be first) ---
 st.set_page_config(page_title="Pokémon Card Tracker", layout="wide")
