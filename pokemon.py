@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
 EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 EBAY_SCOPES = "https://api.ebay.com/oauth/api_scope"
+SHOW_EBAY = False
 
 # --- Page Config (must be first) ---
 st.set_page_config(page_title="Pokémon Card Tracker", layout="wide")
@@ -221,27 +222,27 @@ def check_ebay_sold_listings(card_name, set_name, token):
 st.title("⚡ Pokémon Card Market Dashboard")
 st.write("Search for a specific Pokémon or catch a random one to check its top TCGplayer market prices.")
 
-# eBay connection banner
-ebay_token = get_ebay_token()
-if ebay_token:
-    col_status, col_disconnect = st.columns([4, 1])
-    with col_status:
-        st.success("✅ eBay account connected")
-    with col_disconnect:
-        if st.button("Disconnect eBay"):
-            for key in ["ebay_access_token", "ebay_refresh_token", "ebay_token_expired"]:
-                st.session_state.pop(key, None)
-            st.rerun()
-else:
-    col_status, col_connect = st.columns([4, 1])
-    with col_status:
-        st.warning("⚠️ eBay not connected — sold price data unavailable")
-    with col_connect:
-        auth_url = get_ebay_auth_url()
-        if auth_url:
-            st.link_button("Connect eBay", auth_url, type="primary")
-        else:
-            st.caption("Add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REDIRECT_URI to secrets")
+ebay_token = get_ebay_token() if SHOW_EBAY else None
+if SHOW_EBAY:
+    if ebay_token:
+        col_status, col_disconnect = st.columns([4, 1])
+        with col_status:
+            st.success("✅ eBay account connected")
+        with col_disconnect:
+            if st.button("Disconnect eBay"):
+                for key in ["ebay_access_token", "ebay_refresh_token", "ebay_token_expired"]:
+                    st.session_state.pop(key, None)
+                st.rerun()
+    else:
+        col_status, col_connect = st.columns([4, 1])
+        with col_status:
+            st.warning("⚠️ eBay not connected — sold price data unavailable")
+        with col_connect:
+            auth_url = get_ebay_auth_url()
+            if auth_url:
+                st.link_button("Connect eBay", auth_url, type="primary")
+            else:
+                st.caption("Add EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REDIRECT_URI to secrets")
 
 if 'current_pokemon' not in st.session_state:
     st.session_state.current_pokemon = None
@@ -298,17 +299,18 @@ if st.session_state.current_pokemon:
                         st.caption(f"Set: {card['set']}")
                         st.write(f"TCG Market: **${card['price']:.2f}**")
 
-                        if ebay_token:
-                            ebay_data = check_ebay_sold_listings(card['name'], card['set'], ebay_token)
-                            if ebay_data:
-                                st.caption(
-                                    f"eBay Sold ({ebay_data['count']} sales): "
-                                    f"avg **${ebay_data['avg']:.2f}** "
-                                    f"(${ebay_data['low']:.2f}–${ebay_data['high']:.2f})"
-                                )
+                        if SHOW_EBAY:
+                            if ebay_token:
+                                ebay_data = check_ebay_sold_listings(card['name'], card['set'], ebay_token)
+                                if ebay_data:
+                                    st.caption(
+                                        f"eBay Sold ({ebay_data['count']} sales): "
+                                        f"avg **${ebay_data['avg']:.2f}** "
+                                        f"(${ebay_data['low']:.2f}–${ebay_data['high']:.2f})"
+                                    )
+                                else:
+                                    st.caption("eBay: No recent sales found")
                             else:
-                                st.caption("eBay: No recent sales found")
-                        else:
-                            st.caption("eBay: Connect above to see sold prices")
+                                st.caption("eBay: Connect above to see sold prices")
 
                         st.link_button("View on TCGplayer", card['url'])
