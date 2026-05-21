@@ -4,6 +4,19 @@ import requests
 import base64
 from urllib.parse import urlencode
 
+TYPE_COLORS = {
+    'Normal': '#A8A878', 'Fire': '#F08030', 'Water': '#6890F0',
+    'Electric': '#F8D030', 'Grass': '#78C850', 'Ice': '#98D8D8',
+    'Fighting': '#C03028', 'Poison': '#A040A0', 'Ground': '#E0C068',
+    'Flying': '#A890F0', 'Psychic': '#F85888', 'Bug': '#A8B820',
+    'Rock': '#B8A038', 'Ghost': '#705898', 'Dragon': '#7038F8',
+    'Dark': '#705848', 'Steel': '#B8B8D0', 'Fairy': '#EE99AC',
+}
+STAT_NAMES = {
+    'hp': 'HP', 'attack': 'Atk', 'defense': 'Def',
+    'special-attack': 'Sp.Atk', 'special-defense': 'Sp.Def', 'speed': 'Spd'
+}
+
 # --- eBay OAuth Config ---
 EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
 EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
@@ -132,11 +145,13 @@ def fetch_pokemon_data(identifier):
             pokemon_name = data['species']['name'].replace('-', ' ').title()
             types = [t['type']['name'].capitalize() for t in data['types']]
             sprite_url = data['sprites']['other']['official-artwork']['front_default']
+            stats = {s['stat']['name']: s['base_stat'] for s in data['stats']}
             return {
                 "name": pokemon_name,
                 "id": data['id'],
-                "types": "/".join(types),
+                "types": types,
                 "sprite": sprite_url,
+                "stats": stats,
                 "error": None
             }
         elif response.status_code == 404:
@@ -147,16 +162,18 @@ def fetch_pokemon_data(identifier):
         return {"error": "Connection error to PokéAPI."}
 
 @st.cache_data(ttl=3600)
-def get_tcg_cards(pokemon_name, top_n=5):
+def get_tcg_cards(pokemon_name, top_n=5, api_key=""):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    if api_key:
+        headers['X-Api-Key'] = api_key
     try:
         response = requests.get(
             "https://api.pokemontcg.io/v2/cards",
             headers=headers,
-            params={"q": f'name:"{pokemon_name}"'},
+            params={"q": f'name:"{pokemon_name}"', "pageSize": 250},
         )
         if response.status_code != 200:
-            return None
+            return None, 0
 
         cards = response.json().get('data', [])
         card_prices = []
@@ -164,22 +181,63 @@ def get_tcg_cards(pokemon_name, top_n=5):
             tcgplayer = card.get('tcgplayer', {})
             prices = tcgplayer.get('prices', {})
             highest_price = 0
+            price_low = None
+            price_high = None
             for price_data in prices.values():
                 market_price = price_data.get('market')
                 if market_price is not None and market_price > highest_price:
                     highest_price = market_price
+                low_val = price_data.get('low')
+                high_val = price_data.get('high')
+                if low_val is not None:
+                    price_low = low_val if price_low is None else min(price_low, low_val)
+                if high_val is not None:
+                    price_high = high_val if price_high is None else max(price_high, high_val)
             if highest_price > 0:
                 card_prices.append({
                     'name': card.get('name', pokemon_name),
                     'set': card.get('set', {}).get('name', 'Unknown Set'),
                     'price': highest_price,
                     'image': card.get('images', {}).get('small', ''),
-                    'url': tcgplayer.get('url', '#')
+                    'url': tcgplayer.get('url', '#'),
+                    'rarity': card.get('rarity', 'Unknown'),
+                    'price_low': price_low,
+                    'price_high': price_high,
                 })
         card_prices.sort(key=lambda x: x['price'], reverse=True)
-        return card_prices[:top_n]
+        return card_prices[:top_n], len(card_prices)
     except requests.exceptions.RequestException:
-        return None
+        return None, 0
+
+@st.cache_data(ttl=86400)
+def get_all_types():
+    try:
+        response = requests.get("https://pokeapi.co/api/v2/type/")
+        if response.status_code == 200:
+            types = response.json().get('results', [])
+            return sorted([
+                t['name'].capitalize() for t in types
+                if t['name'] not in ('unknown', 'shadow')
+            ])
+    except requests.exceptions.RequestException:
+        pass
+    return []
+
+@st.cache_data(ttl=86400)
+def get_pokemon_by_type(type_name):
+    try:
+        response = requests.get(f"https://pokeapi.co/api/v2/type/{type_name.lower()}")
+        if response.status_code == 200:
+            return [p['pokemon']['name'] for p in response.json()['pokemon']]
+    except requests.exceptions.RequestException:
+        pass
+    return []
+
+def type_badge(type_name):
+    color = TYPE_COLORS.get(type_name, '#888888')
+    return (f'<span style="background-color:{color}; color:white; padding:2px 10px; '
+            f'border-radius:12px; font-weight:600; font-size:0.85em; margin-right:4px;">'
+            f'{type_name}</span>')
 
 def check_ebay_sold_listings(card_name, set_name, token):
     query = f"{card_name} {set_name} Pokemon card"
@@ -246,16 +304,33 @@ if SHOW_EBAY:
 
 if 'current_pokemon' not in st.session_state:
     st.session_state.current_pokemon = None
+if 'search_history' not in st.session_state:
+    st.session_state.search_history = []
+
+# --- URL param loading ---
+_url_pokemon = st.query_params.get("pokemon")
+if _url_pokemon and st.session_state.current_pokemon is None:
+    with st.spinner("Loading Pokémon..."):
+        st.session_state.current_pokemon = fetch_pokemon_data(_url_pokemon)
 
 # --- Search Controls ---
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Surprise Me!")
+    selected_type = st.selectbox("Filter by type", ["Any type"] + get_all_types(), label_visibility="collapsed")
     if st.button("Catch a Random Pokémon", type="primary", use_container_width=True):
         with st.spinner("Searching the tall grass..."):
-            total_pokemon = get_total_pokemon()
-            random_id = random.randint(1, total_pokemon)
-            st.session_state.current_pokemon = fetch_pokemon_data(random_id)
+            if selected_type == "Any type":
+                total_pokemon = get_total_pokemon()
+                random_id = random.randint(1, total_pokemon)
+                st.session_state.current_pokemon = fetch_pokemon_data(random_id)
+            else:
+                type_pokemon = get_pokemon_by_type(selected_type)
+                if type_pokemon:
+                    chosen = random.choice(type_pokemon)
+                    st.session_state.current_pokemon = fetch_pokemon_data(chosen)
+                else:
+                    st.warning(f"No Pokémon found for type {selected_type}.")
 
 with col2:
     st.subheader("Look Up Pokémon")
@@ -266,6 +341,15 @@ with col2:
             with st.spinner(f"Looking up {search_query}..."):
                 st.session_state.current_pokemon = fetch_pokemon_data(search_query)
 
+if st.session_state.search_history:
+    st.caption("Recent:")
+    history_to_show = st.session_state.search_history[-5:]
+    history_cols = st.columns(len(history_to_show))
+    for idx, entry in enumerate(history_to_show):
+        with history_cols[idx]:
+            if st.button(entry['name'], key=f"history_{entry['id']}"):
+                st.session_state.current_pokemon = fetch_pokemon_data(entry['id'])
+
 st.divider()
 
 # --- Results ---
@@ -275,29 +359,59 @@ if st.session_state.current_pokemon:
     if pokemon.get("error"):
         st.error(pokemon["error"])
     else:
+        st.query_params["pokemon"] = str(pokemon['id'])
+        history = st.session_state.search_history
+        history = [h for h in history if h['id'] != pokemon['id']]
+        history.append({'name': pokemon['name'], 'id': pokemon['id']})
+        st.session_state.search_history = history[-5:]
+
+        primary_type = pokemon['types'][0]
+        accent_color = TYPE_COLORS.get(primary_type, '#888888')
+
         poke_col1, poke_col2 = st.columns([1, 3])
         with poke_col1:
             if pokemon['sprite']:
                 st.image(pokemon['sprite'], width=200)
         with poke_col2:
-            st.header(f"{pokemon['name']} (# {pokemon['id']})")
-            st.subheader(f"Type: {pokemon['types']}")
+            st.markdown(
+                f'<h2 style="color:{accent_color}">{pokemon["name"]} '
+                f'<span style="color:#888; font-size:0.7em">#{pokemon["id"]}</span></h2>',
+                unsafe_allow_html=True
+            )
+            st.markdown("".join(type_badge(t) for t in pokemon['types']), unsafe_allow_html=True)
+
+            st.markdown("**Base Stats**")
+            stat_cols = st.columns(6)
+            for col_idx, (stat_key, stat_label) in enumerate(STAT_NAMES.items()):
+                val = pokemon['stats'].get(stat_key, 0)
+                with stat_cols[col_idx]:
+                    st.metric(stat_label, val)
+                    st.progress(min(val / 255, 1.0))
 
         st.subheader(f"Top Valuable Cards for {pokemon['name']}")
+        api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
         with st.spinner("Pulling data from TCGplayer..."):
-            top_cards = get_tcg_cards(pokemon['name'])
+            top_cards, total_cards = get_tcg_cards(pokemon['name'], api_key=api_key)
 
             if not top_cards:
                 st.warning("No pricing data found for this Pokémon.")
             else:
-                card_columns = st.columns(len(top_cards))
+                st.caption(f"Showing top {len(top_cards)} of {total_cards} cards with pricing data")
+                sort_order = st.selectbox("Sort", ["Price: High → Low", "Price: Low → High"], label_visibility="collapsed")
+                if sort_order == "Price: Low → High":
+                    top_cards = sorted(top_cards, key=lambda x: x['price'])
+
+                card_columns = st.columns(min(len(top_cards), 3))
                 for idx, card in enumerate(top_cards):
-                    with card_columns[idx]:
+                    with card_columns[idx % 3]:
                         if card['image']:
                             st.image(card['image'], use_container_width=True)
                         st.markdown(f"**{card['name']}**")
                         st.caption(f"Set: {card['set']}")
+                        st.caption(f"Rarity: {card['rarity']}")
                         st.write(f"TCG Market: **${card['price']:.2f}**")
+                        if card.get('price_low') and card.get('price_high'):
+                            st.caption(f"Range: ${card['price_low']:.2f} – ${card['price_high']:.2f}")
 
                         if SHOW_EBAY:
                             if ebay_token:
