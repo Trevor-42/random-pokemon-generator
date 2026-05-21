@@ -162,7 +162,7 @@ def fetch_pokemon_data(identifier):
         return {"error": "Connection error to PokéAPI."}
 
 @st.cache_data(ttl=3600)
-def get_tcg_cards(pokemon_name, top_n=5, api_key=""):
+def get_tcg_cards(pokemon_name, top_n=10, api_key=""):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     if api_key:
         headers['X-Api-Key'] = api_key
