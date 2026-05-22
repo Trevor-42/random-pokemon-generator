@@ -368,63 +368,67 @@ if st.session_state.current_pokemon:
         primary_type = pokemon['types'][0]
         accent_color = TYPE_COLORS.get(primary_type, '#888888')
 
-        poke_col1, poke_col2 = st.columns([1, 3])
-        with poke_col1:
-            if pokemon['sprite']:
-                st.image(pokemon['sprite'], width=200)
-        with poke_col2:
-            st.markdown(
-                f'<h2 style="color:{accent_color}">{pokemon["name"]} '
-                f'<span style="color:#888; font-size:0.7em">#{pokemon["id"]}</span></h2>',
-                unsafe_allow_html=True
-            )
-            st.markdown("".join(type_badge(t) for t in pokemon['types']), unsafe_allow_html=True)
+        tab_info, tab_cards = st.tabs(["⚡ Pokémon Info", "💰 Card Market"])
 
-            st.markdown("**Base Stats**")
-            stat_cols = st.columns(6)
-            for col_idx, (stat_key, stat_label) in enumerate(STAT_NAMES.items()):
-                val = pokemon['stats'].get(stat_key, 0)
-                with stat_cols[col_idx]:
-                    st.metric(stat_label, val)
-                    st.progress(min(val / 255, 1.0))
+        with tab_info:
+            poke_col1, poke_col2 = st.columns([1, 3])
+            with poke_col1:
+                if pokemon['sprite']:
+                    st.image(pokemon['sprite'], width=200)
+            with poke_col2:
+                st.markdown(
+                    f'<h2 style="color:{accent_color}">{pokemon["name"]} '
+                    f'<span style="color:#888; font-size:0.7em">#{pokemon["id"]}</span></h2>',
+                    unsafe_allow_html=True
+                )
+                st.markdown("".join(type_badge(t) for t in pokemon['types']), unsafe_allow_html=True)
 
-        st.subheader(f"Top Valuable Cards for {pokemon['name']}")
-        api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
-        with st.spinner("Pulling data from TCGplayer..."):
-            top_cards, total_cards = get_tcg_cards(pokemon['name'], api_key=api_key)
+                st.markdown("**Base Stats**")
+                stat_cols = st.columns(6)
+                for col_idx, (stat_key, stat_label) in enumerate(STAT_NAMES.items()):
+                    val = pokemon['stats'].get(stat_key, 0)
+                    with stat_cols[col_idx]:
+                        st.metric(stat_label, val)
+                        st.progress(min(val / 255, 1.0))
 
-            if not top_cards:
-                st.warning("No pricing data found for this Pokémon.")
-            else:
-                st.caption(f"Showing top {len(top_cards)} of {total_cards} cards with pricing data")
-                sort_order = st.selectbox("Sort", ["Price: High → Low", "Price: Low → High"], label_visibility="collapsed")
-                if sort_order == "Price: Low → High":
-                    top_cards = sorted(top_cards, key=lambda x: x['price'])
+        with tab_cards:
+            st.subheader(f"Top Valuable Cards for {pokemon['name']}")
+            api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
+            with st.spinner("Pulling data from TCGplayer..."):
+                top_cards, total_cards = get_tcg_cards(pokemon['name'], api_key=api_key)
 
-                card_columns = st.columns(min(len(top_cards), 3))
-                for idx, card in enumerate(top_cards):
-                    with card_columns[idx % 3]:
-                        if card['image']:
-                            st.image(card['image'], use_container_width=True)
-                        st.markdown(f"**{card['name']}**")
-                        st.caption(f"Set: {card['set']}")
-                        st.caption(f"Rarity: {card['rarity']}")
-                        st.write(f"TCG Market: **${card['price']:.2f}**")
-                        if card.get('price_low') and card.get('price_high'):
-                            st.caption(f"Range: ${card['price_low']:.2f} – ${card['price_high']:.2f}")
+                if not top_cards:
+                    st.warning("No pricing data found for this Pokémon.")
+                else:
+                    st.caption(f"Showing top {len(top_cards)} of {total_cards} cards with pricing data")
+                    sort_order = st.selectbox("Sort", ["Price: High → Low", "Price: Low → High"], label_visibility="collapsed")
+                    if sort_order == "Price: Low → High":
+                        top_cards = sorted(top_cards, key=lambda x: x['price'])
 
-                        if SHOW_EBAY:
-                            if ebay_token:
-                                ebay_data = check_ebay_sold_listings(card['name'], card['set'], ebay_token)
-                                if ebay_data:
-                                    st.caption(
-                                        f"eBay Sold ({ebay_data['count']} sales): "
-                                        f"avg **${ebay_data['avg']:.2f}** "
-                                        f"(${ebay_data['low']:.2f}–${ebay_data['high']:.2f})"
-                                    )
+                    card_columns = st.columns(min(len(top_cards), 3))
+                    for idx, card in enumerate(top_cards):
+                        with card_columns[idx % 3]:
+                            if card['image']:
+                                st.image(card['image'], use_container_width=True)
+                            st.markdown(f"**{card['name']}**")
+                            st.caption(f"Set: {card['set']}")
+                            st.caption(f"Rarity: {card['rarity']}")
+                            st.write(f"TCG Market: **${card['price']:.2f}**")
+                            if card.get('price_low') and card.get('price_high'):
+                                st.caption(f"Range: ${card['price_low']:.2f} – ${card['price_high']:.2f}")
+
+                            if SHOW_EBAY:
+                                if ebay_token:
+                                    ebay_data = check_ebay_sold_listings(card['name'], card['set'], ebay_token)
+                                    if ebay_data:
+                                        st.caption(
+                                            f"eBay Sold ({ebay_data['count']} sales): "
+                                            f"avg **${ebay_data['avg']:.2f}** "
+                                            f"(${ebay_data['low']:.2f}–${ebay_data['high']:.2f})"
+                                        )
+                                    else:
+                                        st.caption("eBay: No recent sales found")
                                 else:
-                                    st.caption("eBay: No recent sales found")
-                            else:
-                                st.caption("eBay: Connect above to see sold prices")
+                                    st.caption("eBay: Connect above to see sold prices")
 
-                        st.link_button("View on TCGplayer", card['url'])
+                            st.link_button("View on TCGplayer", card['url'])
