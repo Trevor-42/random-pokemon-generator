@@ -277,6 +277,26 @@ def check_ebay_sold_listings(card_name, set_name, token):
 
 # --- UI ---
 
+st.markdown("""
+<style>
+@media screen and (max-width: 640px) {
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap;
+    }
+    [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+    [data-testid="stImage"] img {
+        max-width: 160px !important;
+    }
+    h1 { font-size: 1.5rem !important; }
+    h2 { font-size: 1.2rem !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("⚡ Pokémon Card Market Dashboard")
 st.write("Search for a specific Pokémon or catch a random one to check its top TCGplayer market prices.")
 
