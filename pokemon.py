@@ -521,6 +521,9 @@ with main_tab_binder:
 
     st.divider()
 
+    # Assignment panel placeholder — filled after grid so binder_active is set
+    assignment_container = st.container()
+
     # Filters
     f_col1, f_col2, f_col3 = st.columns(3)
     with f_col1:
@@ -584,7 +587,6 @@ with main_tab_binder:
                     st.caption(entry.get('card_name', ''))
                 if st.button("✏️" if in_binder else "＋", key=f"binder_btn_{pid}", use_container_width=True):
                     st.session_state.binder_active = pkmn['id']
-                    st.rerun()
 
     # Pagination controls (bottom)
     pb_col1, pb_col2, pb_col3 = st.columns([1, 3, 1])
@@ -597,82 +599,78 @@ with main_tab_binder:
             st.session_state.binder_page += 1
             st.rerun()
 
-    # --- Card Assignment Panel ---
-    if st.session_state.binder_active:
-        active_id = st.session_state.binder_active
-        pkmn_data = next((p for p in all_pokemon if p['id'] == active_id), None)
-        if pkmn_data:
-            st.divider()
-            pid = str(active_id)
-            existing = binder.get(pid, {})
-            sprite_url = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{active_id}.png"
+    # --- Card Assignment Panel (rendered into container above grid) ---
+    with assignment_container:
+        if st.session_state.binder_active:
+            active_id = st.session_state.binder_active
+            pkmn_data = next((p for p in all_pokemon if p['id'] == active_id), None)
+            if pkmn_data:
+                pid = str(active_id)
+                existing = binder.get(pid, {})
+                sprite_url = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{active_id}.png"
 
-            assign_col1, assign_col2 = st.columns([1, 5])
-            with assign_col1:
-                st.image(sprite_url, width=80)
-            with assign_col2:
-                st.subheader(f"#{active_id:04d} {pkmn_data['name']}")
-                if existing:
-                    st.caption(f"Currently: {existing.get('card_name', '?')} · {existing.get('card_set', '?')} · ${existing.get('card_value', 0):.2f}")
+                assign_col1, assign_col2 = st.columns([1, 5])
+                with assign_col1:
+                    st.image(sprite_url, width=80)
+                with assign_col2:
+                    st.subheader(f"#{active_id:04d} {pkmn_data['name']}")
+                    if existing:
+                        st.caption(f"Currently: {existing.get('card_name', '?')} · {existing.get('card_set', '?')} · ${existing.get('card_value', 0):.2f}")
 
-            # TCG card picker
-            api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
-            with st.spinner(f"Loading cards for {pkmn_data['name']}..."):
-                tcg_cards, _ = get_tcg_cards(pkmn_data['name'], top_n=6, api_key=api_key)
+                api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
+                with st.spinner(f"Loading cards for {pkmn_data['name']}..."):
+                    tcg_cards, _ = get_tcg_cards(pkmn_data['name'], top_n=6, api_key=api_key)
 
-            if tcg_cards:
-                st.markdown("**Pick a card from TCGplayer data:**")
-                pick_cols = st.columns(min(len(tcg_cards), 3))
-                for cidx, card in enumerate(tcg_cards):
-                    with pick_cols[cidx % 3]:
-                        if card['image']:
-                            st.image(card['image'], width=80)
-                        st.caption(f"{card['name']}")
-                        st.caption(f"{card['set']}")
-                        st.write(f"**${card['price']:.2f}**")
-                        if st.button("Select", key=f"pick_{active_id}_{cidx}"):
+                if tcg_cards:
+                    st.markdown("**Pick a card from TCGplayer data:**")
+                    pick_cols = st.columns(min(len(tcg_cards), 3))
+                    for cidx, card in enumerate(tcg_cards):
+                        with pick_cols[cidx % 3]:
+                            if card['image']:
+                                st.image(card['image'], width=80)
+                            st.caption(f"{card['name']}")
+                            st.caption(f"{card['set']}")
+                            st.write(f"**${card['price']:.2f}**")
+                            if st.button("Select", key=f"pick_{active_id}_{cidx}"):
+                                st.session_state.binder[pid] = {
+                                    "card_name": card['name'],
+                                    "card_set": card['set'],
+                                    "card_value": card['price'],
+                                    "card_image": card['image'],
+                                }
+                                st.session_state.binder_dirty = True
+                                st.session_state.binder_active = None
+                else:
+                    st.caption("No TCGplayer data found — use manual entry below.")
+
+                with st.expander("Manual entry / override"):
+                    m_col1, m_col2, m_col3 = st.columns(3)
+                    with m_col1:
+                        card_name_in = st.text_input("Card name", value=existing.get('card_name', ''), key=f"mn_{active_id}")
+                    with m_col2:
+                        card_set_in = st.text_input("Set", value=existing.get('card_set', ''), key=f"ms_{active_id}")
+                    with m_col3:
+                        card_val_in = st.number_input("Value ($)", value=float(existing.get('card_value', 0.0)), min_value=0.0, step=0.01, key=f"mv_{active_id}")
+
+                    save_c, remove_c, cancel_c = st.columns(3)
+                    with save_c:
+                        if st.button("💾 Save", key=f"save_{active_id}"):
                             st.session_state.binder[pid] = {
-                                "card_name": card['name'],
-                                "card_set": card['set'],
-                                "card_value": card['price'],
-                                "card_image": card['image'],
+                                "card_name": card_name_in,
+                                "card_set": card_set_in,
+                                "card_value": card_val_in,
+                                "card_image": existing.get('card_image', ''),
                             }
                             st.session_state.binder_dirty = True
                             st.session_state.binder_active = None
-                            st.rerun()
-            else:
-                st.caption("No TCGplayer data found — use manual entry below.")
-
-            # Manual entry
-            with st.expander("Manual entry / override"):
-                m_col1, m_col2, m_col3 = st.columns(3)
-                with m_col1:
-                    card_name_in = st.text_input("Card name", value=existing.get('card_name', ''), key=f"mn_{active_id}")
-                with m_col2:
-                    card_set_in = st.text_input("Set", value=existing.get('card_set', ''), key=f"ms_{active_id}")
-                with m_col3:
-                    card_val_in = st.number_input("Value ($)", value=float(existing.get('card_value', 0.0)), min_value=0.0, step=0.01, key=f"mv_{active_id}")
-
-                save_c, remove_c, cancel_c = st.columns(3)
-                with save_c:
-                    if st.button("💾 Save", key=f"save_{active_id}"):
-                        st.session_state.binder[pid] = {
-                            "card_name": card_name_in,
-                            "card_set": card_set_in,
-                            "card_value": card_val_in,
-                            "card_image": existing.get('card_image', ''),
-                        }
-                        st.session_state.binder_dirty = True
-                        st.session_state.binder_active = None
-                        st.rerun()
-                with remove_c:
-                    if pid in binder:
-                        if st.button("🗑️ Remove", key=f"remove_{active_id}"):
-                            del st.session_state.binder[pid]
-                            st.session_state.binder_dirty = True
+                    with remove_c:
+                        if pid in binder:
+                            if st.button("🗑️ Remove", key=f"remove_{active_id}"):
+                                del st.session_state.binder[pid]
+                                st.session_state.binder_dirty = True
+                                st.session_state.binder_active = None
+                    with cancel_c:
+                        if st.button("✖ Cancel", key=f"cancel_{active_id}"):
                             st.session_state.binder_active = None
-                            st.rerun()
-                with cancel_c:
-                    if st.button("✖ Cancel", key=f"cancel_{active_id}"):
-                        st.session_state.binder_active = None
-                        st.rerun()
+
+                st.divider()
