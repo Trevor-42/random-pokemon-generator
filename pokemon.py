@@ -640,6 +640,7 @@ with main_tab_binder:
                                 }
                                 st.session_state.binder_dirty = True
                                 st.session_state.binder_active = None
+                                st.rerun()
                 else:
                     st.caption("No TCGplayer data found — use manual entry below.")
 
@@ -663,14 +664,17 @@ with main_tab_binder:
                             }
                             st.session_state.binder_dirty = True
                             st.session_state.binder_active = None
+                            st.rerun()
                     with remove_c:
                         if pid in binder:
                             if st.button("🗑️ Remove", key=f"remove_{active_id}"):
                                 del st.session_state.binder[pid]
                                 st.session_state.binder_dirty = True
                                 st.session_state.binder_active = None
+                                st.rerun()
                     with cancel_c:
                         if st.button("✖ Cancel", key=f"cancel_{active_id}"):
                             st.session_state.binder_active = None
+                            st.rerun()
 
                 st.divider()
