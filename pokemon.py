@@ -194,7 +194,7 @@ def get_tcg_cards(pokemon_name, top_n=10, api_key=""):
         response = requests.get(
             "https://api.pokemontcg.io/v2/cards",
             headers=headers,
-            params={"q": f'name:"{pokemon_name}"', "pageSize": 250},
+            params={"q": f'name:{pokemon_name}*', "pageSize": 250},
         )
         if response.status_code != 200:
             return None, 0
