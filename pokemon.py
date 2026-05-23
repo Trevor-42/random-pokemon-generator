@@ -465,7 +465,7 @@ with main_tab_search:
                 st.subheader(f"Top Valuable Cards for {pokemon['name']}")
                 api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
                 with st.spinner("Pulling data from TCGplayer..."):
-                    top_cards, total_cards = get_tcg_cards(pokemon['name'], api_key=api_key)
+                    top_cards, total_cards = get_tcg_cards(pokemon['name'], top_n=20, api_key=api_key)
 
                     if not top_cards:
                         st.warning("No pricing data found for this Pokémon.")
@@ -619,7 +619,7 @@ with main_tab_binder:
 
                 api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
                 with st.spinner(f"Loading cards for {pkmn_data['name']}..."):
-                    tcg_cards, _ = get_tcg_cards(pkmn_data['name'], top_n=6, api_key=api_key)
+                    tcg_cards, _ = get_tcg_cards(pkmn_data['name'], top_n=20, api_key=api_key)
 
                 if tcg_cards:
                     st.markdown("**Pick a card from TCGplayer data:**")
