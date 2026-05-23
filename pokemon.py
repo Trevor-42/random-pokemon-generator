@@ -3,6 +3,7 @@ import streamlit as st
 import random
 import requests
 import base64
+from datetime import datetime
 from urllib.parse import urlencode
 from streamlit_local_storage import LocalStorage
 
@@ -23,6 +24,9 @@ GENERATIONS = {
     "Gen 4": (387, 493), "Gen 5": (494, 649), "Gen 6": (650, 721),
     "Gen 7": (722, 809), "Gen 8": (810, 905), "Gen 9": (906, 1025),
 }
+
+CONDITION_MULT = {"NM": 1.0, "LP": 0.85, "MP": 0.70, "HP": 0.50, "Damaged": 0.30}
+CONDITION_COLORS = {"NM": "#4CAF50", "LP": "#8BC34A", "MP": "#FFC107", "HP": "#FF5722", "Damaged": "#9E9E9E"}
 
 # --- eBay OAuth Config ---
 EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
@@ -253,6 +257,41 @@ def get_pokemon_by_type(type_name):
         response = requests.get(f"https://pokeapi.co/api/v2/type/{type_name.lower()}")
         if response.status_code == 200:
             return [p['pokemon']['name'] for p in response.json()['pokemon']]
+    except requests.exceptions.RequestException:
+        pass
+    return []
+
+@st.cache_data(ttl=86400)
+def get_tcg_sets(api_key=""):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    if api_key:
+        headers['X-Api-Key'] = api_key
+    try:
+        response = requests.get(
+            "https://api.pokemontcg.io/v2/sets",
+            headers=headers,
+            params={"pageSize": 250}
+        )
+        if response.status_code == 200:
+            sets = response.json().get('data', [])
+            return sorted(sets, key=lambda s: s.get('releaseDate', ''), reverse=True)
+    except requests.exceptions.RequestException:
+        pass
+    return []
+
+@st.cache_data(ttl=3600)
+def get_set_cards(set_id, api_key=""):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    if api_key:
+        headers['X-Api-Key'] = api_key
+    try:
+        response = requests.get(
+            "https://api.pokemontcg.io/v2/cards",
+            headers=headers,
+            params={"q": f"set.id:{set_id}", "pageSize": 250, "orderBy": "number"}
+        )
+        if response.status_code == 200:
+            return response.json().get('data', [])
     except requests.exceptions.RequestException:
         pass
     return []
@@ -519,19 +558,75 @@ with main_tab_binder:
         st.metric("Missing", f"{1025 - owned_count}")
     st.progress(owned_count / 1025)
 
+    # Refresh prices button
+    api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
+    refresh_col, _ = st.columns([1, 3])
+    with refresh_col:
+        if st.button("🔄 Refresh All Prices", disabled=owned_count == 0):
+            all_pkmn_list = get_all_pokemon_list()
+            updated = 0
+            with st.spinner(f"Refreshing prices for {owned_count} Pokémon..."):
+                for pid, entry in list(st.session_state.binder.items()):
+                    pkmn = next((p for p in all_pkmn_list if str(p['id']) == pid), None)
+                    if not pkmn:
+                        continue
+                    cards, _ = get_tcg_cards(pkmn['name'], top_n=20, api_key=api_key)
+                    if not cards:
+                        continue
+                    match = next(
+                        (c for c in cards
+                         if c['name'] == entry.get('card_name') and c['set'] == entry.get('card_set')),
+                        None
+                    )
+                    if match:
+                        old_price = entry.get('card_value', 0)
+                        new_price = match['price']
+                        if old_price != new_price:
+                            st.session_state.binder[pid]['old_price'] = old_price
+                            st.session_state.binder[pid]['card_value'] = new_price
+                            st.session_state.binder[pid]['last_price_update'] = datetime.now().isoformat()
+                            updated += 1
+            if updated:
+                st.session_state.binder_dirty = True
+                st.success(f"Updated prices for {updated} cards.")
+                st.rerun()
+            else:
+                st.info("All prices already up to date.")
+
+    # Portfolio chart
+    if owned_count > 0:
+        with st.expander("📊 Portfolio Breakdown by Generation"):
+            gen_values = {}
+            gen_counts = {}
+            for gen_name, (lo, hi) in GENERATIONS.items():
+                vals = [v.get('card_value', 0) for pid, v in binder.items() if lo <= int(pid) <= hi]
+                if vals:
+                    gen_values[gen_name] = round(sum(vals), 2)
+                    gen_counts[gen_name] = len(vals)
+            if gen_values:
+                chart_col1, chart_col2 = st.columns(2)
+                with chart_col1:
+                    st.caption("**Value by Generation ($)**")
+                    st.bar_chart(gen_values)
+                with chart_col2:
+                    st.caption("**Cards Owned by Generation**")
+                    st.bar_chart(gen_counts)
+
     st.divider()
 
     # Assignment panel placeholder — filled after grid so binder_active is set
     assignment_container = st.container()
 
     # Filters
-    f_col1, f_col2, f_col3 = st.columns(3)
+    f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
         binder_filter = st.selectbox("Show", ["All", "Owned", "Missing"], key="binder_filter_sel")
     with f_col2:
         binder_search = st.text_input("Search", placeholder="Search Pokémon name...", label_visibility="collapsed", key="binder_search_inp")
     with f_col3:
         gen_filter = st.selectbox("Generation", ["All"] + list(GENERATIONS.keys()), key="binder_gen_sel")
+    with f_col4:
+        sort_by = st.selectbox("Sort by", ["Pokédex #", "Value ↓", "Value ↑", "Name A→Z", "Recently Added"], key="binder_sort_sel")
 
     # Load and filter Pokémon list
     all_pokemon = get_all_pokemon_list()
@@ -546,6 +641,17 @@ with main_tab_binder:
         filtered = [p for p in filtered if str(p['id']) in binder]
     elif binder_filter == "Missing":
         filtered = [p for p in filtered if str(p['id']) not in binder]
+
+    # Sort
+    if sort_by == "Value ↓":
+        filtered = sorted(filtered, key=lambda p: binder.get(str(p['id']), {}).get('card_value', 0), reverse=True)
+    elif sort_by == "Value ↑":
+        filtered = sorted(filtered, key=lambda p: binder.get(str(p['id']), {}).get('card_value', 0))
+    elif sort_by == "Name A→Z":
+        filtered = sorted(filtered, key=lambda p: p['name'])
+    elif sort_by == "Recently Added":
+        filtered = sorted(filtered, key=lambda p: binder.get(str(p['id']), {}).get('date_added', ''), reverse=True)
+    # default "Pokédex #" — already sorted by id from get_all_pokemon_list()
 
     # Pagination
     PER_PAGE = 50
@@ -583,7 +689,21 @@ with main_tab_binder:
                 entry = binder.get(pid, {})
                 st.caption(f"#{pkmn['id']:04d} {pkmn['name']}")
                 if in_binder:
-                    st.markdown(f"✅ **${entry.get('card_value', 0):.2f}**")
+                    cond = entry.get('condition', 'NM')
+                    cond_color = CONDITION_COLORS.get(cond, '#888')
+                    old_price = entry.get('old_price')
+                    cur_price = entry.get('card_value', 0)
+                    price_str = f"**${cur_price:.2f}**"
+                    if old_price is not None and old_price != cur_price:
+                        delta = cur_price - old_price
+                        arrow = "▲" if delta > 0 else "▼"
+                        color = "green" if delta > 0 else "red"
+                        price_str += f' <span style="color:{color};font-size:0.75em">{arrow}${abs(delta):.2f}</span>'
+                    st.markdown(f'✅ {price_str}', unsafe_allow_html=True)
+                    st.markdown(
+                        f'<span style="background:{cond_color};color:white;padding:1px 6px;border-radius:8px;font-size:0.7em">{cond}</span>',
+                        unsafe_allow_html=True
+                    )
                     st.caption(entry.get('card_name', ''))
                 if st.button("✏️" if in_binder else "＋", key=f"binder_btn_{pid}", use_container_width=True):
                     st.session_state.binder_active = pkmn['id']
@@ -637,6 +757,8 @@ with main_tab_binder:
                                     "card_set": card['set'],
                                     "card_value": card['price'],
                                     "card_image": card['image'],
+                                    "condition": "NM",
+                                    "date_added": datetime.now().isoformat(),
                                 }
                                 st.session_state.binder_dirty = True
                                 st.session_state.binder_active = None
@@ -645,6 +767,10 @@ with main_tab_binder:
                     st.caption("No TCGplayer data found — use manual entry below.")
 
                 with st.expander("Manual entry / override"):
+                    cond_options = ["NM", "LP", "MP", "HP", "Damaged"]
+                    cond_default = existing.get('condition', 'NM')
+                    cond_idx = cond_options.index(cond_default) if cond_default in cond_options else 0
+                    condition_sel = st.selectbox("Condition", cond_options, index=cond_idx, key=f"cond_{active_id}")
                     m_col1, m_col2, m_col3 = st.columns(3)
                     with m_col1:
                         card_name_in = st.text_input("Card name", value=existing.get('card_name', ''), key=f"mn_{active_id}")
@@ -661,6 +787,8 @@ with main_tab_binder:
                                 "card_set": card_set_in,
                                 "card_value": card_val_in,
                                 "card_image": existing.get('card_image', ''),
+                                "condition": condition_sel,
+                                "date_added": existing.get('date_added', datetime.now().isoformat()),
                             }
                             st.session_state.binder_dirty = True
                             st.session_state.binder_active = None
@@ -678,3 +806,45 @@ with main_tab_binder:
                             st.rerun()
 
                 st.divider()
+
+    # --- Set Completion Tracker ---
+    st.subheader("🗂️ Set Completion Tracker")
+    sets_list = get_tcg_sets(api_key=api_key)
+    if sets_list:
+        set_options = {f"{s['name']} ({s.get('releaseDate', '')[:4]})": s['id'] for s in sets_list}
+        selected_set_label = st.selectbox("Pick a set", list(set_options.keys()), key="set_tracker_sel")
+        selected_set_id = set_options[selected_set_label]
+
+        with st.spinner("Loading set cards..."):
+            set_cards = get_set_cards(selected_set_id, api_key=api_key)
+
+        if set_cards:
+            owned_in_set = [
+                c for c in set_cards
+                if any(
+                    e.get('card_name') == c.get('name') and e.get('card_set') == c.get('set', {}).get('name')
+                    for e in binder.values()
+                )
+            ]
+            total_in_set = len(set_cards)
+            owned_in_set_count = len(owned_in_set)
+            st.caption(f"Owned: {owned_in_set_count} / {total_in_set}")
+            st.progress(owned_in_set_count / total_in_set if total_in_set > 0 else 0)
+
+            set_grid_cols = st.columns(6)
+            for sidx, card in enumerate(set_cards):
+                card_name = card.get('name', '')
+                card_set_name = card.get('set', {}).get('name', '')
+                is_owned = any(
+                    e.get('card_name') == card_name and e.get('card_set') == card_set_name
+                    for e in binder.values()
+                )
+                with set_grid_cols[sidx % 6]:
+                    img = card.get('images', {}).get('small', '')
+                    if img:
+                        st.image(img, use_container_width=True)
+                    st.caption(f"{'✅' if is_owned else '☐'} {card.get('number', '')} {card_name}")
+        else:
+            st.caption("No cards found for this set.")
+    else:
+        st.caption("Could not load sets from pokemontcg.io.")
