@@ -1,4 +1,6 @@
 import json
+import csv
+import io
 import streamlit as st
 import random
 import requests
@@ -106,7 +108,6 @@ def get_ebay_token():
     if "ebay_access_token" not in st.session_state:
         return None
 
-    # Try to refresh if we have a refresh token stored
     if st.session_state.get("ebay_token_expired"):
         refresh_token = st.session_state.get("ebay_refresh_token")
         if refresh_token:
@@ -117,13 +118,12 @@ def get_ebay_token():
                 if "refresh_token" in token_data:
                     st.session_state.ebay_refresh_token = token_data["refresh_token"]
             else:
-                # Refresh failed — clear tokens and re-auth
                 del st.session_state["ebay_access_token"]
                 return None
 
     return st.session_state.get("ebay_access_token")
 
-# --- Handle OAuth Callback (eBay redirects back with ?code=...) ---
+# --- Handle OAuth Callback ---
 query_params = st.query_params
 if "code" in query_params and "ebay_access_token" not in st.session_state:
     with st.spinner("Connecting to eBay..."):
@@ -189,6 +189,36 @@ def fetch_pokemon_data(identifier):
             return {"error": "API Error. Please try again later."}
     except requests.exceptions.RequestException:
         return {"error": "Connection error to PokéAPI."}
+
+@st.cache_data(ttl=86400)
+def get_evolution_chain(species_id):
+    """Fetch evolution chain for a Pokémon species."""
+    try:
+        spec_resp = requests.get(f"https://pokeapi.co/api/v2/pokemon-species/{species_id}")
+        if spec_resp.status_code != 200:
+            return []
+        chain_url = spec_resp.json().get('evolution_chain', {}).get('url')
+        if not chain_url:
+            return []
+        chain_resp = requests.get(chain_url)
+        if chain_resp.status_code != 200:
+            return []
+
+        chain_data = chain_resp.json().get('chain', {})
+        evos = []
+
+        def walk(node):
+            species = node.get('species', {})
+            name = species.get('name', '').replace('-', ' ').title()
+            sid = int(species.get('url', '/0/').rstrip('/').split('/')[-1])
+            evos.append({"name": name, "id": sid})
+            for child in node.get('evolves_to', []):
+                walk(child)
+
+        walk(chain_data)
+        return evos
+    except requests.exceptions.RequestException:
+        return []
 
 @st.cache_data(ttl=3600)
 def get_tcg_cards(pokemon_name, top_n=10, api_key=""):
@@ -358,12 +388,22 @@ st.markdown("""
     h1 { font-size: 1.5rem !important; }
     h2 { font-size: 1.2rem !important; }
 }
+@media print {
+    [data-testid="stSidebar"], [data-testid="stHeader"],
+    [data-testid="stToolbar"], .stButton, .stSelectbox,
+    .stTextInput, .stTabs [data-baseweb="tab-list"],
+    [data-testid="stDecoration"] { display: none !important; }
+    [data-testid="stAppViewContainer"] { padding: 0 !important; }
+    [data-testid="stImage"] img { max-width: 60px !important; }
+    .print-binder-grid { break-inside: avoid; }
+    @page { margin: 0.5in; size: landscape; }
+}
 </style>
 """, unsafe_allow_html=True)
 
 st.title("⚡ Pokémon Card Market Dashboard")
 
-# --- LocalStorage init (must be at top level, not inside tabs) ---
+# --- LocalStorage init ---
 localS = LocalStorage()
 _binder_raw = localS.getItem("pokedex_binder")
 if "binder_initialized" not in st.session_state:
@@ -376,9 +416,25 @@ if "binder_initialized" not in st.session_state:
     else:
         st.session_state.binder = {}
 
+# Wishlist localStorage
+_wishlist_raw = localS.getItem("pokemon_wishlist")
+if "wishlist_initialized" not in st.session_state:
+    if _wishlist_raw:
+        try:
+            st.session_state.wishlist = json.loads(_wishlist_raw)
+            st.session_state.wishlist_initialized = True
+        except (json.JSONDecodeError, TypeError):
+            st.session_state.wishlist = {}
+    else:
+        st.session_state.wishlist = {}
+
 if st.session_state.get("binder_dirty"):
     localS.setItem("pokedex_binder", json.dumps(st.session_state.binder))
     st.session_state.binder_dirty = False
+
+if st.session_state.get("wishlist_dirty"):
+    localS.setItem("pokemon_wishlist", json.dumps(st.session_state.wishlist))
+    st.session_state.wishlist_dirty = False
 
 # --- eBay banner ---
 ebay_token = get_ebay_token() if SHOW_EBAY else None
@@ -412,6 +468,8 @@ if 'binder_page' not in st.session_state:
     st.session_state.binder_page = 0
 if 'binder_active' not in st.session_state:
     st.session_state.binder_active = None
+if 'compare_list' not in st.session_state:
+    st.session_state.compare_list = []
 
 # --- URL param loading ---
 _url_pokemon = st.query_params.get("pokemon")
@@ -420,10 +478,15 @@ if _url_pokemon and st.session_state.current_pokemon is None:
         st.session_state.current_pokemon = fetch_pokemon_data(_url_pokemon)
 
 # --- Top-level tabs ---
-main_tab_search, main_tab_binder, main_tab_top = st.tabs(["🔍 Search & Card Market", "📒 Pokédex Binder", "💎 Top 1025"])
+main_tab_search, main_tab_binder, main_tab_top, main_tab_compare, main_tab_wishlist, main_tab_stats = st.tabs([
+    "🔍 Search & Card Market", "📒 Pokédex Binder", "💎 Top 1025",
+    "⚖️ Compare", "💫 Wishlist", "📊 Stats"
+])
 
+# ============================================================
+# SEARCH & CARD MARKET TAB
+# ============================================================
 with main_tab_search:
-    # --- Search Controls ---
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Surprise Me!")
@@ -462,7 +525,6 @@ with main_tab_search:
 
     st.divider()
 
-    # --- Results ---
     if st.session_state.current_pokemon:
         pokemon = st.session_state.current_pokemon
 
@@ -500,6 +562,23 @@ with main_tab_search:
                         with stat_cols[col_idx]:
                             st.metric(stat_label, val)
                             st.progress(min(val / 255, 1.0))
+
+                # Evolution Chain
+                evo_chain = get_evolution_chain(pokemon['id'])
+                if evo_chain and len(evo_chain) > 1:
+                    st.markdown("**Evolution Chain**")
+                    evo_cols = st.columns(len(evo_chain))
+                    for evo_idx, evo in enumerate(evo_chain):
+                        with evo_cols[evo_idx]:
+                            evo_sprite = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{evo['id']}.png"
+                            st.image(evo_sprite, width=80)
+                            is_current = evo['id'] == pokemon['id']
+                            label = f"**{evo['name']}**" if is_current else evo['name']
+                            st.caption(label)
+                            if not is_current:
+                                if st.button(f"→ {evo['name']}", key=f"evo_{evo['id']}"):
+                                    st.session_state.current_pokemon = fetch_pokemon_data(evo['id'])
+                                    st.rerun()
 
             with tab_cards:
                 st.subheader(f"Top Valuable Cards for {pokemon['name']}")
@@ -543,7 +622,9 @@ with main_tab_search:
 
                                 st.link_button("View on TCGplayer", card['url'])
 
-# --- Pokédex Binder Tab ---
+# ============================================================
+# POKÉDEX BINDER TAB
+# ============================================================
 with main_tab_binder:
     binder = st.session_state.binder
     owned_count = len(binder)
@@ -559,11 +640,11 @@ with main_tab_binder:
         st.metric("Missing", f"{1025 - owned_count}")
     st.progress(owned_count / 1025)
 
-    # Refresh prices button
+    # Export / Import / Refresh / Print
     api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
-    refresh_col, _ = st.columns([1, 3])
-    with refresh_col:
-        if st.button("🔄 Refresh All Prices", disabled=owned_count == 0):
+    action_col1, action_col2, action_col3, action_col4 = st.columns(4)
+    with action_col1:
+        if st.button("🔄 Refresh All Prices", disabled=owned_count == 0, use_container_width=True):
             all_pkmn_list = get_all_pokemon_list()
             updated = 0
             with st.spinner(f"Refreshing prices for {owned_count} Pokémon..."):
@@ -593,6 +674,97 @@ with main_tab_binder:
                 st.rerun()
             else:
                 st.info("All prices already up to date.")
+    with action_col2:
+        # Export JSON
+        if owned_count > 0:
+            binder_json = json.dumps(st.session_state.binder, indent=2)
+            st.download_button("📥 Export JSON", binder_json, "binder_export.json", "application/json", use_container_width=True)
+        else:
+            st.button("📥 Export JSON", disabled=True, use_container_width=True)
+    with action_col3:
+        # Export CSV
+        if owned_count > 0:
+            all_pkmn_list = get_all_pokemon_list()
+            pkmn_lookup = {str(p['id']): p['name'] for p in all_pkmn_list}
+            csv_buf = io.StringIO()
+            writer = csv.writer(csv_buf)
+            writer.writerow(["Pokedex #", "Pokemon", "Card Name", "Set", "Value", "Condition", "Date Added"])
+            for pid, entry in sorted(st.session_state.binder.items(), key=lambda x: int(x[0])):
+                writer.writerow([
+                    pid, pkmn_lookup.get(pid, '?'), entry.get('card_name', ''),
+                    entry.get('card_set', ''), f"{entry.get('card_value', 0):.2f}",
+                    entry.get('condition', 'NM'), entry.get('date_added', '')
+                ])
+            st.download_button("📥 Export CSV", csv_buf.getvalue(), "binder_export.csv", "text/csv", use_container_width=True)
+        else:
+            st.button("📥 Export CSV", disabled=True, use_container_width=True)
+    with action_col4:
+        # Print button
+        st.markdown(
+            '<button onclick="window.print()" style="width:100%;padding:0.5rem;border:1px solid #ccc;'
+            'border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">🖨️ Print Binder</button>',
+            unsafe_allow_html=True
+        )
+
+    # Import
+    with st.expander("📤 Import Binder Data"):
+        uploaded = st.file_uploader("Upload JSON or CSV", type=["json", "csv"], key="binder_import")
+        if uploaded:
+            try:
+                if uploaded.name.endswith('.json'):
+                    imported = json.loads(uploaded.read().decode('utf-8'))
+                    if isinstance(imported, dict):
+                        merge_col1, merge_col2 = st.columns(2)
+                        with merge_col1:
+                            if st.button("🔄 Merge (keep existing)", key="import_merge"):
+                                for k, v in imported.items():
+                                    if k not in st.session_state.binder:
+                                        st.session_state.binder[k] = v
+                                st.session_state.binder_dirty = True
+                                st.success(f"Merged {len(imported)} entries.")
+                                st.rerun()
+                        with merge_col2:
+                            if st.button("⚠️ Replace all", key="import_replace"):
+                                st.session_state.binder = imported
+                                st.session_state.binder_dirty = True
+                                st.success(f"Replaced with {len(imported)} entries.")
+                                st.rerun()
+                    else:
+                        st.error("Invalid JSON format — expected object with Pokédex IDs as keys.")
+                elif uploaded.name.endswith('.csv'):
+                    content = uploaded.read().decode('utf-8')
+                    reader = csv.DictReader(io.StringIO(content))
+                    imported = {}
+                    for row in reader:
+                        pid = row.get('Pokedex #', '').strip()
+                        if pid:
+                            imported[pid] = {
+                                "card_name": row.get('Card Name', ''),
+                                "card_set": row.get('Set', ''),
+                                "card_value": float(row.get('Value', 0)),
+                                "condition": row.get('Condition', 'NM'),
+                                "date_added": row.get('Date Added', datetime.now().isoformat()),
+                            }
+                    if imported:
+                        merge_col1, merge_col2 = st.columns(2)
+                        with merge_col1:
+                            if st.button("🔄 Merge (keep existing)", key="import_csv_merge"):
+                                for k, v in imported.items():
+                                    if k not in st.session_state.binder:
+                                        st.session_state.binder[k] = v
+                                st.session_state.binder_dirty = True
+                                st.success(f"Merged {len(imported)} entries.")
+                                st.rerun()
+                        with merge_col2:
+                            if st.button("⚠️ Replace all", key="import_csv_replace"):
+                                st.session_state.binder = imported
+                                st.session_state.binder_dirty = True
+                                st.success(f"Replaced with {len(imported)} entries.")
+                                st.rerun()
+                    else:
+                        st.warning("No valid rows found in CSV.")
+            except Exception as e:
+                st.error(f"Import error: {e}")
 
     # Portfolio chart
     if owned_count > 0:
@@ -615,7 +787,7 @@ with main_tab_binder:
 
     st.divider()
 
-    # Assignment panel placeholder — filled after grid so binder_active is set
+    # Assignment panel placeholder
     assignment_container = st.container()
 
     # Filters
@@ -629,7 +801,7 @@ with main_tab_binder:
     with f_col4:
         sort_by = st.selectbox("Sort by", ["Pokédex #", "Value ↓", "Value ↑", "Name A→Z", "Recently Added"], key="binder_sort_sel")
 
-    # Load and filter Pokémon list
+    # Load and filter
     all_pokemon = get_all_pokemon_list()
     filtered = all_pokemon
 
@@ -652,7 +824,6 @@ with main_tab_binder:
         filtered = sorted(filtered, key=lambda p: p['name'])
     elif sort_by == "Recently Added":
         filtered = sorted(filtered, key=lambda p: binder.get(str(p['id']), {}).get('date_added', ''), reverse=True)
-    # default "Pokédex #" — already sorted by id from get_all_pokemon_list()
 
     # Pagination
     PER_PAGE = 50
@@ -664,7 +835,6 @@ with main_tab_binder:
     page_start = st.session_state.binder_page * PER_PAGE
     page_pokemon = filtered[page_start:page_start + PER_PAGE]
 
-    # Pagination controls (top)
     p_col1, p_col2, p_col3 = st.columns([1, 3, 1])
     with p_col1:
         if st.button("← Prev", disabled=st.session_state.binder_page == 0, key="binder_prev_top"):
@@ -709,7 +879,7 @@ with main_tab_binder:
                 if st.button("✏️" if in_binder else "＋", key=f"binder_btn_{pid}", use_container_width=True):
                     st.session_state.binder_active = pkmn['id']
 
-    # Pagination controls (bottom)
+    # Pagination bottom
     pb_col1, pb_col2, pb_col3 = st.columns([1, 3, 1])
     with pb_col1:
         if st.button("← Prev", disabled=st.session_state.binder_page == 0, key="binder_prev_bot"):
@@ -720,7 +890,7 @@ with main_tab_binder:
             st.session_state.binder_page += 1
             st.rerun()
 
-    # --- Card Assignment Panel (rendered into container above grid) ---
+    # --- Card Assignment Panel ---
     with assignment_container:
         if st.session_state.binder_active:
             active_id = st.session_state.binder_active
@@ -850,7 +1020,9 @@ with main_tab_binder:
     else:
         st.caption("Could not load sets from pokemontcg.io.")
 
-# --- Top 1025 Tab ---
+# ============================================================
+# TOP 1025 TAB
+# ============================================================
 with main_tab_top:
     st.subheader("💎 Most Valuable Card per Pokémon")
     st.caption("The single highest TCGplayer market price card for each of the 1025 Pokémon.")
@@ -862,7 +1034,6 @@ with main_tab_top:
     if "top1025_page" not in st.session_state:
         st.session_state.top1025_page = 0
 
-    # Also persist to localStorage so page refresh doesn't re-fetch
     _top1025_raw = localS.getItem("top1025_cache")
     if st.session_state.top1025_data is None and _top1025_raw:
         try:
@@ -923,13 +1094,15 @@ with main_tab_top:
     else:
         data = st.session_state.top1025_data
 
-        # Controls
-        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 2, 1])
+        # Controls — added gen filter
+        ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([2, 1, 1, 1])
         with ctrl_col1:
             top_search = st.text_input("Filter", placeholder="Search Pokémon name...", label_visibility="collapsed", key="top1025_search")
         with ctrl_col2:
-            top_sort = st.selectbox("Sort", ["Price ↓", "Price ↑", "Pokédex #"], key="top1025_sort_sel", label_visibility="collapsed")
+            top_gen_filter = st.selectbox("Gen", ["All"] + list(GENERATIONS.keys()), key="top1025_gen_sel", label_visibility="collapsed")
         with ctrl_col3:
+            top_sort = st.selectbox("Sort", ["Price ↓", "Price ↑", "Pokédex #"], key="top1025_sort_sel", label_visibility="collapsed")
+        with ctrl_col4:
             if st.button("🔄 Reload", use_container_width=True):
                 st.session_state.top1025_data = None
                 st.session_state.top1025_page = 0
@@ -940,6 +1113,9 @@ with main_tab_top:
         display_data = data
         if top_search:
             display_data = [r for r in display_data if top_search.lower() in r['pokemon'].lower()]
+        if top_gen_filter != "All":
+            lo, hi = GENERATIONS[top_gen_filter]
+            display_data = [r for r in display_data if lo <= r['id'] <= hi]
         if top_sort == "Price ↓":
             display_data = sorted(display_data, key=lambda x: x['price'], reverse=True)
         elif top_sort == "Price ↑":
@@ -977,6 +1153,7 @@ with main_tab_top:
         page_data = display_data[page_start_top:page_start_top + TOP_PER_PAGE]
 
         # Grid
+        binder = st.session_state.binder
         for row_start in range(0, len(page_data), TOP_COLS):
             row = page_data[row_start:row_start + TOP_COLS]
             cols = st.columns(TOP_COLS)
@@ -988,4 +1165,227 @@ with main_tab_top:
                     st.caption(f"{rank_label} **{item['pokemon']}**")
                     st.write(f"**${item['price']:.2f}**")
                     st.caption(item['set'])
+                    pid = str(item['id'])
+                    if pid in binder:
+                        st.caption("✅ In binder")
+                    else:
+                        if st.button("📒 Add", key=f"top_add_{item['id']}", use_container_width=True):
+                            st.session_state.binder[pid] = {
+                                "card_name": item['card_name'],
+                                "card_set": item['set'],
+                                "card_value": item['price'],
+                                "card_image": item['image'],
+                                "condition": "NM",
+                                "date_added": datetime.now().isoformat(),
+                            }
+                            st.session_state.binder_dirty = True
+                            st.rerun()
                     st.link_button("TCGplayer ↗", item['url'], use_container_width=True)
+
+# ============================================================
+# COMPARE TAB
+# ============================================================
+with main_tab_compare:
+    st.subheader("⚖️ Compare Pokémon")
+    st.caption("Select up to 3 Pokémon to compare stats and most valuable cards side-by-side.")
+
+    all_pkmn_names = get_all_pokemon_list()
+    name_to_id = {p['name']: p['id'] for p in all_pkmn_names}
+
+    compare_cols = st.columns(3)
+    compare_pokemon = []
+    for i in range(3):
+        with compare_cols[i]:
+            pick = st.selectbox(
+                f"Pokémon {i+1}",
+                ["—"] + [p['name'] for p in all_pkmn_names],
+                key=f"compare_pick_{i}"
+            )
+            if pick != "—":
+                compare_pokemon.append(pick)
+
+    if compare_pokemon:
+        st.divider()
+        comp_cols = st.columns(len(compare_pokemon))
+        api_key_cmp = st.secrets.get("POKEMONTCG_API_KEY", "")
+
+        for ci, pname in enumerate(compare_pokemon):
+            with comp_cols[ci]:
+                pdata = fetch_pokemon_data(name_to_id[pname])
+                if pdata and not pdata.get('error'):
+                    if pdata['sprite']:
+                        st.image(pdata['sprite'], width=150)
+                    primary = pdata['types'][0]
+                    accent = TYPE_COLORS.get(primary, '#888')
+                    st.markdown(
+                        f'<h3 style="color:{accent}">{pdata["name"]} '
+                        f'<span style="color:#888;font-size:0.6em">#{pdata["id"]}</span></h3>',
+                        unsafe_allow_html=True
+                    )
+                    st.markdown("".join(type_badge(t) for t in pdata['types']), unsafe_allow_html=True)
+
+                    st.markdown("**Stats**")
+                    for stat_key, stat_label in STAT_NAMES.items():
+                        val = pdata['stats'].get(stat_key, 0)
+                        st.caption(f"{stat_label}: **{val}**")
+                        st.progress(min(val / 255, 1.0))
+
+                    bst = sum(pdata['stats'].values())
+                    st.metric("Base Stat Total", bst)
+
+                    # Top card
+                    cards, _ = get_tcg_cards(pdata['name'], top_n=1, api_key=api_key_cmp)
+                    if cards:
+                        st.divider()
+                        st.caption("**Most Valuable Card**")
+                        if cards[0]['image']:
+                            st.image(cards[0]['image'], use_container_width=True)
+                        st.write(f"**${cards[0]['price']:.2f}**")
+                        st.caption(f"{cards[0]['name']} · {cards[0]['set']}")
+
+# ============================================================
+# WISHLIST TAB
+# ============================================================
+with main_tab_wishlist:
+    st.subheader("💫 Wishlist")
+    st.caption("Track Pokémon cards you want. Set a target price and see current TCGplayer value.")
+
+    wishlist = st.session_state.wishlist
+
+    # Add to wishlist
+    with st.expander("➕ Add to Wishlist", expanded=len(wishlist) == 0):
+        all_pkmn_w = get_all_pokemon_list()
+        w_col1, w_col2 = st.columns([3, 1])
+        with w_col1:
+            wish_pick = st.selectbox("Pokémon", [p['name'] for p in all_pkmn_w], key="wish_pick_sel")
+        with w_col2:
+            wish_target = st.number_input("Target price ($)", min_value=0.0, step=0.50, value=10.0, key="wish_target_in")
+        if st.button("Add to Wishlist", use_container_width=True):
+            wish_id = str(next(p['id'] for p in all_pkmn_w if p['name'] == wish_pick))
+            st.session_state.wishlist[wish_id] = {
+                "name": wish_pick,
+                "target_price": wish_target,
+                "date_added": datetime.now().isoformat(),
+            }
+            st.session_state.wishlist_dirty = True
+            st.rerun()
+
+    if not wishlist:
+        st.info("Wishlist empty. Add Pokémon above.")
+    else:
+        st.caption(f"{len(wishlist)} Pokémon on wishlist")
+        api_key_w = st.secrets.get("POKEMONTCG_API_KEY", "")
+        wish_cols = st.columns(min(len(wishlist), 4))
+        for widx, (wid, wentry) in enumerate(wishlist.items()):
+            with wish_cols[widx % min(len(wishlist), 4)]:
+                sprite = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{wid}.png"
+                st.image(sprite, width=72)
+                st.markdown(f"**{wentry['name']}**")
+                st.caption(f"Target: ${wentry['target_price']:.2f}")
+
+                # Check current price
+                cards, _ = get_tcg_cards(wentry['name'], top_n=1, api_key=api_key_w)
+                if cards:
+                    cur = cards[0]['price']
+                    if cur <= wentry['target_price']:
+                        st.success(f"🎯 ${cur:.2f} — below target!")
+                    else:
+                        st.write(f"Current: ${cur:.2f}")
+                else:
+                    st.caption("No price data")
+
+                if st.button("🗑️", key=f"wish_rm_{wid}"):
+                    del st.session_state.wishlist[wid]
+                    st.session_state.wishlist_dirty = True
+                    st.rerun()
+
+# ============================================================
+# STATS TAB
+# ============================================================
+with main_tab_stats:
+    st.subheader("📊 Collection Statistics")
+    binder = st.session_state.binder
+
+    if not binder:
+        st.info("No cards in your binder yet. Add some in the Pokédex Binder tab!")
+    else:
+        values = [v.get('card_value', 0) for v in binder.values()]
+        conditions = [v.get('condition', 'NM') for v in binder.values()]
+        rarities = []
+        all_pkmn_s = get_all_pokemon_list()
+        pkmn_lookup_s = {str(p['id']): p for p in all_pkmn_s}
+
+        # Overview metrics
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        with m_col1:
+            st.metric("Total Cards", len(binder))
+        with m_col2:
+            st.metric("Total Value", f"${sum(values):,.2f}")
+        with m_col3:
+            st.metric("Average Value", f"${sum(values)/len(values):,.2f}" if values else "$0.00")
+        with m_col4:
+            st.metric("Completion", f"{len(binder)/1025*100:.1f}%")
+
+        st.divider()
+
+        # Most / Least valuable
+        sorted_entries = sorted(binder.items(), key=lambda x: x[1].get('card_value', 0), reverse=True)
+
+        val_col1, val_col2 = st.columns(2)
+        with val_col1:
+            st.markdown("**💰 Most Valuable**")
+            for pid, entry in sorted_entries[:5]:
+                pname = pkmn_lookup_s.get(pid, {}).get('name', f'#{pid}')
+                st.caption(f"#{int(pid):04d} {pname} — **${entry.get('card_value', 0):.2f}** ({entry.get('card_name', '')})")
+        with val_col2:
+            st.markdown("**🪙 Least Valuable**")
+            for pid, entry in sorted_entries[-5:]:
+                pname = pkmn_lookup_s.get(pid, {}).get('name', f'#{pid}')
+                st.caption(f"#{int(pid):04d} {pname} — **${entry.get('card_value', 0):.2f}** ({entry.get('card_name', '')})")
+
+        st.divider()
+
+        # Condition breakdown
+        cond_col1, cond_col2 = st.columns(2)
+        with cond_col1:
+            st.markdown("**Card Condition Breakdown**")
+            cond_counts = {}
+            for c in conditions:
+                cond_counts[c] = cond_counts.get(c, 0) + 1
+            st.bar_chart(cond_counts)
+        with cond_col2:
+            st.markdown("**Value by Generation**")
+            gen_val = {}
+            for pid, entry in binder.items():
+                pid_int = int(pid)
+                for gen_name, (lo, hi) in GENERATIONS.items():
+                    if lo <= pid_int <= hi:
+                        gen_val[gen_name] = gen_val.get(gen_name, 0) + entry.get('card_value', 0)
+                        break
+            if gen_val:
+                st.bar_chart({k: round(v, 2) for k, v in gen_val.items()})
+
+        st.divider()
+
+        # Type distribution
+        st.markdown("**Type Distribution of Collected Pokémon**")
+        type_counts = {}
+        for pid in binder:
+            pkmn_info = pkmn_lookup_s.get(pid)
+            if pkmn_info:
+                pdata = fetch_pokemon_data(int(pid))
+                if pdata and not pdata.get('error'):
+                    for t in pdata.get('types', []):
+                        type_counts[t] = type_counts.get(t, 0) + 1
+        if type_counts:
+            st.bar_chart(dict(sorted(type_counts.items(), key=lambda x: x[1], reverse=True)))
+
+        st.divider()
+
+        # Recently added
+        st.markdown("**🕐 Recently Added**")
+        recent = sorted(binder.items(), key=lambda x: x[1].get('date_added', ''), reverse=True)[:10]
+        for pid, entry in recent:
+            pname = pkmn_lookup_s.get(pid, {}).get('name', f'#{pid}')
+            date_str = entry.get('date_added', '')[:10]
+            st.caption(f"#{int(pid):04d} {pname} — {entry.get('card_name', '')} · ${entry.get('card_value', 0):.2f} · {date_str}")
