@@ -5,6 +5,7 @@ import requests
 import base64
 from datetime import datetime
 from urllib.parse import urlencode
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from streamlit_local_storage import LocalStorage
 
 TYPE_COLORS = {
@@ -861,23 +862,33 @@ with main_tab_top:
     if "top1025_page" not in st.session_state:
         st.session_state.top1025_page = 0
 
+    # Also persist to localStorage so page refresh doesn't re-fetch
+    _top1025_raw = localS.getItem("top1025_cache")
+    if st.session_state.top1025_data is None and _top1025_raw:
+        try:
+            st.session_state.top1025_data = json.loads(_top1025_raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     if st.session_state.top1025_data is None:
         st.info(
-            "⏱️ **First load fetches all 1025 Pokémon from TCGplayer** — takes ~2 minutes. "
-            "Results are cached for 1 hour so subsequent visits are instant."
+            "⏱️ **First load fetches all 1025 Pokémon from TCGplayer** — takes ~20-30 seconds. "
+            "Results are saved in your browser so you only wait once."
         )
         load_col, _ = st.columns([1, 3])
         with load_col:
             if st.button("🚀 Load Top 1025", type="primary", use_container_width=True):
                 all_pkmn = get_all_pokemon_list()
+                total = len(all_pkmn)
                 results = []
                 prog = st.progress(0)
                 status_txt = st.empty()
-                for i, pkmn in enumerate(all_pkmn):
-                    status_txt.caption(f"Fetching {pkmn['name']}... ({i + 1}/{len(all_pkmn)})")
+                done_count = 0
+
+                def fetch_one(pkmn):
                     cards, _ = get_tcg_cards(pkmn['name'], top_n=1, api_key=api_key_top)
                     if cards:
-                        results.append({
+                        return {
                             "id": pkmn['id'],
                             "pokemon": pkmn['name'],
                             "card_name": cards[0]['name'],
@@ -886,8 +897,20 @@ with main_tab_top:
                             "price": cards[0]['price'],
                             "image": cards[0]['image'],
                             "url": cards[0]['url'],
-                        })
-                    prog.progress((i + 1) / len(all_pkmn))
+                        }
+                    return None
+
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = {executor.submit(fetch_one, p): p for p in all_pkmn}
+                    for future in as_completed(futures):
+                        done_count += 1
+                        pkmn = futures[future]
+                        status_txt.caption(f"Fetched {done_count}/{total} — {pkmn['name']}")
+                        prog.progress(done_count / total)
+                        result = future.result()
+                        if result:
+                            results.append(result)
+
                 status_txt.empty()
                 prog.empty()
                 results.sort(key=lambda x: x['price'], reverse=True)
@@ -895,6 +918,7 @@ with main_tab_top:
                     r['rank'] = i + 1
                 st.session_state.top1025_data = results
                 st.session_state.top1025_page = 0
+                localS.setItem("top1025_cache", json.dumps(results))
                 st.rerun()
     else:
         data = st.session_state.top1025_data
@@ -909,6 +933,7 @@ with main_tab_top:
             if st.button("🔄 Reload", use_container_width=True):
                 st.session_state.top1025_data = None
                 st.session_state.top1025_page = 0
+                localS.deleteItem("top1025_cache")
                 st.rerun()
 
         # Filter + sort
