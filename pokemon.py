@@ -419,7 +419,7 @@ if _url_pokemon and st.session_state.current_pokemon is None:
         st.session_state.current_pokemon = fetch_pokemon_data(_url_pokemon)
 
 # --- Top-level tabs ---
-main_tab_search, main_tab_binder = st.tabs(["🔍 Search & Card Market", "📒 Pokédex Binder"])
+main_tab_search, main_tab_binder, main_tab_top = st.tabs(["🔍 Search & Card Market", "📒 Pokédex Binder", "💎 Top 1025"])
 
 with main_tab_search:
     # --- Search Controls ---
@@ -737,7 +737,6 @@ with main_tab_binder:
                     if existing:
                         st.caption(f"Currently: {existing.get('card_name', '?')} · {existing.get('card_set', '?')} · ${existing.get('card_value', 0):.2f}")
 
-                api_key = st.secrets.get("POKEMONTCG_API_KEY", "")
                 with st.spinner(f"Loading cards for {pkmn_data['name']}..."):
                     tcg_cards, _ = get_tcg_cards(pkmn_data['name'], top_n=20, api_key=api_key)
 
@@ -771,6 +770,7 @@ with main_tab_binder:
                     cond_default = existing.get('condition', 'NM')
                     cond_idx = cond_options.index(cond_default) if cond_default in cond_options else 0
                     condition_sel = st.selectbox("Condition", cond_options, index=cond_idx, key=f"cond_{active_id}")
+
                     m_col1, m_col2, m_col3 = st.columns(3)
                     with m_col1:
                         card_name_in = st.text_input("Card name", value=existing.get('card_name', ''), key=f"mn_{active_id}")
@@ -848,3 +848,119 @@ with main_tab_binder:
             st.caption("No cards found for this set.")
     else:
         st.caption("Could not load sets from pokemontcg.io.")
+
+# --- Top 1025 Tab ---
+with main_tab_top:
+    st.subheader("💎 Most Valuable Card per Pokémon")
+    st.caption("The single highest TCGplayer market price card for each of the 1025 Pokémon.")
+
+    api_key_top = st.secrets.get("POKEMONTCG_API_KEY", "")
+
+    if "top1025_data" not in st.session_state:
+        st.session_state.top1025_data = None
+    if "top1025_page" not in st.session_state:
+        st.session_state.top1025_page = 0
+
+    if st.session_state.top1025_data is None:
+        st.info(
+            "⏱️ **First load fetches all 1025 Pokémon from TCGplayer** — takes ~2 minutes. "
+            "Results are cached for 1 hour so subsequent visits are instant."
+        )
+        load_col, _ = st.columns([1, 3])
+        with load_col:
+            if st.button("🚀 Load Top 1025", type="primary", use_container_width=True):
+                all_pkmn = get_all_pokemon_list()
+                results = []
+                prog = st.progress(0)
+                status_txt = st.empty()
+                for i, pkmn in enumerate(all_pkmn):
+                    status_txt.caption(f"Fetching {pkmn['name']}... ({i + 1}/{len(all_pkmn)})")
+                    cards, _ = get_tcg_cards(pkmn['name'], top_n=1, api_key=api_key_top)
+                    if cards:
+                        results.append({
+                            "id": pkmn['id'],
+                            "pokemon": pkmn['name'],
+                            "card_name": cards[0]['name'],
+                            "set": cards[0]['set'],
+                            "rarity": cards[0]['rarity'],
+                            "price": cards[0]['price'],
+                            "image": cards[0]['image'],
+                            "url": cards[0]['url'],
+                        })
+                    prog.progress((i + 1) / len(all_pkmn))
+                status_txt.empty()
+                prog.empty()
+                results.sort(key=lambda x: x['price'], reverse=True)
+                for i, r in enumerate(results):
+                    r['rank'] = i + 1
+                st.session_state.top1025_data = results
+                st.session_state.top1025_page = 0
+                st.rerun()
+    else:
+        data = st.session_state.top1025_data
+
+        # Controls
+        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 2, 1])
+        with ctrl_col1:
+            top_search = st.text_input("Filter", placeholder="Search Pokémon name...", label_visibility="collapsed", key="top1025_search")
+        with ctrl_col2:
+            top_sort = st.selectbox("Sort", ["Price ↓", "Price ↑", "Pokédex #"], key="top1025_sort_sel", label_visibility="collapsed")
+        with ctrl_col3:
+            if st.button("🔄 Reload", use_container_width=True):
+                st.session_state.top1025_data = None
+                st.session_state.top1025_page = 0
+                st.rerun()
+
+        # Filter + sort
+        display_data = data
+        if top_search:
+            display_data = [r for r in display_data if top_search.lower() in r['pokemon'].lower()]
+        if top_sort == "Price ↓":
+            display_data = sorted(display_data, key=lambda x: x['price'], reverse=True)
+        elif top_sort == "Price ↑":
+            display_data = sorted(display_data, key=lambda x: x['price'])
+        elif top_sort == "Pokédex #":
+            display_data = sorted(display_data, key=lambda x: x['id'])
+
+        total_value_top = sum(r['price'] for r in display_data)
+        t_col1, t_col2 = st.columns(2)
+        with t_col1:
+            st.metric("Pokémon with pricing", len(display_data))
+        with t_col2:
+            st.metric("Combined value", f"${total_value_top:,.2f}")
+
+        # Pagination
+        TOP_PER_PAGE = 50
+        TOP_COLS = 5
+        total_top_pages = max(1, (len(display_data) + TOP_PER_PAGE - 1) // TOP_PER_PAGE)
+        if st.session_state.top1025_page >= total_top_pages:
+            st.session_state.top1025_page = 0
+
+        tp_col1, tp_col2, tp_col3 = st.columns([1, 3, 1])
+        with tp_col1:
+            if st.button("← Prev", disabled=st.session_state.top1025_page == 0, key="top_prev"):
+                st.session_state.top1025_page -= 1
+                st.rerun()
+        with tp_col2:
+            st.caption(f"Page {st.session_state.top1025_page + 1} of {total_top_pages}  ·  {len(display_data)} Pokémon")
+        with tp_col3:
+            if st.button("Next →", disabled=st.session_state.top1025_page >= total_top_pages - 1, key="top_next"):
+                st.session_state.top1025_page += 1
+                st.rerun()
+
+        page_start_top = st.session_state.top1025_page * TOP_PER_PAGE
+        page_data = display_data[page_start_top:page_start_top + TOP_PER_PAGE]
+
+        # Grid
+        for row_start in range(0, len(page_data), TOP_COLS):
+            row = page_data[row_start:row_start + TOP_COLS]
+            cols = st.columns(TOP_COLS)
+            for col_idx, item in enumerate(row):
+                with cols[col_idx]:
+                    if item['image']:
+                        st.image(item['image'], use_container_width=True)
+                    rank_label = f"#{item['rank']}" if top_sort == "Price ↓" else f"#{item['id']:04d}"
+                    st.caption(f"{rank_label} **{item['pokemon']}**")
+                    st.write(f"**${item['price']:.2f}**")
+                    st.caption(item['set'])
+                    st.link_button("TCGplayer ↗", item['url'], use_container_width=True)
