@@ -38,7 +38,7 @@ EBAY_SCOPES = "https://api.ebay.com/oauth/api_scope"
 SHOW_EBAY = False
 
 # --- Page Config (must be first) ---
-st.set_page_config(page_title="Pokémon Card Tracker", layout="wide")
+st.set_page_config(page_title="Pokémon Card Vault", layout="wide", page_icon="🔥")
 
 # --- eBay OAuth Helpers ---
 
@@ -329,8 +329,10 @@ def get_set_cards(set_id, api_key=""):
 
 def type_badge(type_name):
     color = TYPE_COLORS.get(type_name, '#888888')
-    return (f'<span style="background-color:{color}; color:white; padding:2px 10px; '
-            f'border-radius:12px; font-weight:600; font-size:0.85em; margin-right:4px;">'
+    return (f'<span style="background:{color}22; color:{color}; border:1px solid {color}66; '
+            f'padding:3px 12px; border-radius:4px; font-weight:700; font-size:0.78em; '
+            f'margin-right:5px; letter-spacing:0.08em; text-transform:uppercase; '
+            f'font-family:\'Chakra Petch\',sans-serif;">'
             f'{type_name}</span>')
 
 def check_ebay_sold_listings(card_name, set_name, token):
@@ -373,35 +375,303 @@ def check_ebay_sold_listings(card_name, set_name, token):
 
 st.markdown("""
 <style>
-@media screen and (max-width: 640px) {
-    [data-testid="stHorizontalBlock"] {
-        flex-wrap: wrap;
-    }
-    [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-        width: 100% !important;
-        flex: 1 1 100% !important;
-        min-width: 100% !important;
-    }
-    [data-testid="stImage"] img {
-        max-width: 160px !important;
-    }
-    h1 { font-size: 1.5rem !important; }
-    h2 { font-size: 1.2rem !important; }
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Sora:wght@300;400;500;600;700&display=swap');
+
+:root {
+    --vault-bg: #08080e;
+    --vault-surface: #0f0f1a;
+    --vault-card: #131322;
+    --vault-border: #1e1e38;
+    --vault-hover: #1a1a35;
+    --fire: #ff6b35;
+    --fire-dim: #ff6b3522;
+    --ember: #ff8c42;
+    --gold: #ffc857;
+    --teal: #00e5a0;
+    --teal-dim: #00e5a022;
+    --text-primary: #e8e8f0;
+    --text-secondary: #6e6e8a;
+    --text-muted: #44445a;
 }
+
+/* ── Global ── */
+html, body, [data-testid="stAppViewContainer"],
+[data-testid="stApp"] {
+    background-color: var(--vault-bg) !important;
+    color: var(--text-primary) !important;
+    font-family: 'Sora', sans-serif !important;
+}
+[data-testid="stMain"] > div { background: var(--vault-bg) !important; }
+[data-testid="stHeader"] { background: transparent !important; }
+[data-testid="stToolbar"] { display: none !important; }
+.block-container { max-width: 1200px; padding-top: 2rem !important; }
+
+/* ── Typography ── */
+h1, h2, h3, .vault-title {
+    font-family: 'Chakra Petch', sans-serif !important;
+    letter-spacing: -0.02em;
+}
+h1 { color: var(--text-primary) !important; font-weight: 700 !important; }
+h2 { color: var(--text-primary) !important; font-weight: 600 !important; font-size: 1.4rem !important; }
+h3 { color: var(--text-primary) !important; font-weight: 600 !important; }
+p, span, label, .stMarkdown { color: var(--text-primary) !important; }
+[data-testid="stCaptionContainer"] { color: var(--text-secondary) !important; }
+[data-testid="stCaptionContainer"] * { color: var(--text-secondary) !important; }
+
+/* ── Tabs ── */
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    background: var(--vault-surface) !important;
+    border-radius: 8px !important;
+    padding: 4px !important;
+    gap: 2px !important;
+    border: 1px solid var(--vault-border) !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"] {
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+    border-radius: 6px !important;
+    font-family: 'Chakra Petch', sans-serif !important;
+    font-weight: 500 !important;
+    font-size: 0.82rem !important;
+    letter-spacing: 0.03em !important;
+    padding: 8px 16px !important;
+    transition: all 0.2s ease !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
+    background: var(--fire-dim) !important;
+    color: var(--fire) !important;
+    border-bottom: none !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"]:hover {
+    background: var(--vault-hover) !important;
+    color: var(--text-primary) !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+[data-testid="stTabs"] [data-baseweb="tab-border"] { display: none !important; }
+
+/* ── Buttons ── */
+.stButton > button {
+    background: var(--vault-surface) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--vault-border) !important;
+    border-radius: 6px !important;
+    font-family: 'Sora', sans-serif !important;
+    font-weight: 500 !important;
+    font-size: 0.82rem !important;
+    transition: all 0.2s ease !important;
+    letter-spacing: 0.02em;
+}
+.stButton > button:hover {
+    background: var(--vault-hover) !important;
+    border-color: var(--fire) !important;
+    color: var(--fire) !important;
+    box-shadow: 0 0 20px var(--fire-dim) !important;
+}
+.stButton > button[kind="primary"],
+.stButton > button[data-testid="stBaseButton-primary"] {
+    background: linear-gradient(135deg, var(--fire), var(--ember)) !important;
+    color: #fff !important;
+    border: none !important;
+    font-weight: 600 !important;
+}
+.stButton > button[kind="primary"]:hover,
+.stButton > button[data-testid="stBaseButton-primary"]:hover {
+    box-shadow: 0 4px 24px #ff6b3544 !important;
+    transform: translateY(-1px);
+}
+.stDownloadButton > button {
+    background: var(--vault-surface) !important;
+    color: var(--gold) !important;
+    border: 1px solid var(--gold)33 !important;
+    border-radius: 6px !important;
+    font-family: 'Sora', sans-serif !important;
+}
+.stDownloadButton > button:hover {
+    border-color: var(--gold) !important;
+    box-shadow: 0 0 16px #ffc85722 !important;
+}
+.stLinkButton > a {
+    background: var(--vault-surface) !important;
+    color: var(--teal) !important;
+    border: 1px solid var(--teal)33 !important;
+    border-radius: 6px !important;
+    font-family: 'Sora', sans-serif !important;
+    font-size: 0.82rem !important;
+    transition: all 0.2s ease !important;
+}
+.stLinkButton > a:hover {
+    border-color: var(--teal) !important;
+    box-shadow: 0 0 16px var(--teal-dim) !important;
+}
+
+/* ── Inputs ── */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input {
+    background: var(--vault-surface) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--vault-border) !important;
+    border-radius: 6px !important;
+    font-family: 'Sora', sans-serif !important;
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stNumberInput"] input:focus {
+    border-color: var(--fire) !important;
+    box-shadow: 0 0 12px var(--fire-dim) !important;
+}
+[data-baseweb="select"] > div {
+    background: var(--vault-surface) !important;
+    border: 1px solid var(--vault-border) !important;
+    border-radius: 6px !important;
+    color: var(--text-primary) !important;
+}
+[data-baseweb="popover"] {
+    background: var(--vault-card) !important;
+    border: 1px solid var(--vault-border) !important;
+}
+[data-baseweb="popover"] li {
+    color: var(--text-primary) !important;
+}
+[data-baseweb="popover"] li:hover {
+    background: var(--vault-hover) !important;
+}
+
+/* ── Metrics ── */
+[data-testid="stMetric"] {
+    background: var(--vault-surface) !important;
+    border: 1px solid var(--vault-border) !important;
+    border-radius: 8px !important;
+    padding: 16px !important;
+}
+[data-testid="stMetricValue"] {
+    font-family: 'Chakra Petch', sans-serif !important;
+    color: var(--gold) !important;
+    font-weight: 700 !important;
+}
+[data-testid="stMetricLabel"] {
+    color: var(--text-secondary) !important;
+    font-family: 'Sora', sans-serif !important;
+    text-transform: uppercase !important;
+    font-size: 0.7rem !important;
+    letter-spacing: 0.1em !important;
+}
+
+/* ── Progress bars ── */
+.stProgress > div > div > div {
+    background: linear-gradient(90deg, var(--fire), var(--ember), var(--gold)) !important;
+    border-radius: 4px !important;
+}
+.stProgress > div > div {
+    background: var(--vault-surface) !important;
+    border-radius: 4px !important;
+}
+
+/* ── Expander ── */
+[data-testid="stExpander"] {
+    background: var(--vault-surface) !important;
+    border: 1px solid var(--vault-border) !important;
+    border-radius: 8px !important;
+}
+[data-testid="stExpander"] summary {
+    color: var(--text-primary) !important;
+    font-family: 'Chakra Petch', sans-serif !important;
+}
+[data-testid="stExpander"] details {
+    border: none !important;
+}
+
+/* ── Divider ── */
+hr { border-color: var(--vault-border) !important; opacity: 0.5; }
+
+/* ── Alerts ── */
+[data-testid="stAlert"] {
+    background: var(--vault-surface) !important;
+    border: 1px solid var(--vault-border) !important;
+    border-radius: 8px !important;
+    color: var(--text-primary) !important;
+}
+
+/* ── Images — card hover glow ── */
+[data-testid="stImage"] img {
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+[data-testid="stImage"]:hover img {
+    transform: scale(1.03);
+    filter: brightness(1.08);
+}
+
+/* ── Spinner ── */
+.stSpinner > div { color: var(--fire) !important; }
+
+/* ── File uploader ── */
+[data-testid="stFileUploader"] {
+    background: var(--vault-surface) !important;
+    border: 1px dashed var(--vault-border) !important;
+    border-radius: 8px !important;
+}
+[data-testid="stFileUploader"] * { color: var(--text-secondary) !important; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--vault-bg); }
+::-webkit-scrollbar-thumb { background: var(--vault-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fire); }
+
+/* ── Charts ── */
+[data-testid="stVegaLiteChart"] { border-radius: 8px; overflow: hidden; }
+
+/* ── Column containers ── */
+[data-testid="column"] { transition: all 0.2s ease; }
+
+/* ── Form ── */
+[data-testid="stForm"] {
+    background: var(--vault-surface) !important;
+    border: 1px solid var(--vault-border) !important;
+    border-radius: 8px !important;
+    padding: 1rem !important;
+}
+.stFormSubmitButton > button {
+    background: linear-gradient(135deg, var(--fire), var(--ember)) !important;
+    color: #fff !important;
+    border: none !important;
+    font-weight: 600 !important;
+}
+
+/* ── Mobile ── */
+@media screen and (max-width: 640px) {
+    [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+    [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+        width: 100% !important; flex: 1 1 100% !important; min-width: 100% !important;
+    }
+    [data-testid="stImage"] img { max-width: 140px !important; }
+    h1 { font-size: 1.4rem !important; }
+    h2 { font-size: 1.1rem !important; }
+    [data-testid="stTabs"] [data-baseweb="tab"] { font-size: 0.7rem !important; padding: 6px 10px !important; }
+}
+
+/* ── Print ── */
 @media print {
     [data-testid="stSidebar"], [data-testid="stHeader"],
     [data-testid="stToolbar"], .stButton, .stSelectbox,
     .stTextInput, .stTabs [data-baseweb="tab-list"],
     [data-testid="stDecoration"] { display: none !important; }
-    [data-testid="stAppViewContainer"] { padding: 0 !important; }
+    [data-testid="stAppViewContainer"] { padding: 0 !important; background: #fff !important; }
+    * { color: #111 !important; }
     [data-testid="stImage"] img { max-width: 60px !important; }
-    .print-binder-grid { break-inside: avoid; }
     @page { margin: 0.5in; size: landscape; }
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Pokémon Card Market Dashboard")
+st.markdown(
+    '<h1 style="font-family:\'Chakra Petch\',sans-serif; font-weight:700; '
+    'background:linear-gradient(135deg,#ff6b35,#ffc857); -webkit-background-clip:text; '
+    '-webkit-text-fill-color:transparent; font-size:2.2rem; margin-bottom:0.5rem; '
+    'letter-spacing:-0.03em;">POKÉMON CARD VAULT</h1>'
+    '<p style="color:#6e6e8a; font-family:\'Sora\',sans-serif; font-size:0.85rem; '
+    'letter-spacing:0.08em; text-transform:uppercase; margin-top:-0.5rem;">Track · Trade · Collect</p>',
+    unsafe_allow_html=True
+)
 
 # --- LocalStorage init ---
 localS = LocalStorage()
@@ -549,8 +819,9 @@ with main_tab_search:
                         st.image(pokemon['sprite'], width=200)
                 with poke_col2:
                     st.markdown(
-                        f'<h2 style="color:{accent_color}">{pokemon["name"]} '
-                        f'<span style="color:#888; font-size:0.7em">#{pokemon["id"]}</span></h2>',
+                        f'<h2 style="font-family:\'Chakra Petch\',sans-serif; color:{accent_color}; margin-bottom:0.3rem;">'
+                        f'{pokemon["name"]} '
+                        f'<span style="color:#6e6e8a; font-size:0.65em; font-weight:400">#{pokemon["id"]:04d}</span></h2>',
                         unsafe_allow_html=True
                     )
                     st.markdown("".join(type_badge(t) for t in pokemon['types']), unsafe_allow_html=True)
@@ -701,8 +972,12 @@ with main_tab_binder:
     with action_col4:
         # Print button
         st.markdown(
-            '<button onclick="window.print()" style="width:100%;padding:0.5rem;border:1px solid #ccc;'
-            'border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">🖨️ Print Binder</button>',
+            '<button onclick="window.print()" style="width:100%;padding:0.5rem;border:1px solid #1e1e38;'
+            'border-radius:6px;background:#0f0f1a;color:#e8e8f0;cursor:pointer;font-size:0.82rem;'
+            'font-family:Sora,sans-serif;transition:all 0.2s ease;"'
+            ' onmouseover="this.style.borderColor=\'#ff6b35\';this.style.color=\'#ff6b35\';this.style.boxShadow=\'0 0 20px #ff6b3522\'"'
+            ' onmouseout="this.style.borderColor=\'#1e1e38\';this.style.color=\'#e8e8f0\';this.style.boxShadow=\'none\'"'
+            '>🖨️ Print Binder</button>',
             unsafe_allow_html=True
         )
 
@@ -1218,8 +1493,9 @@ with main_tab_compare:
                     primary = pdata['types'][0]
                     accent = TYPE_COLORS.get(primary, '#888')
                     st.markdown(
-                        f'<h3 style="color:{accent}">{pdata["name"]} '
-                        f'<span style="color:#888;font-size:0.6em">#{pdata["id"]}</span></h3>',
+                        f'<h3 style="font-family:\'Chakra Petch\',sans-serif; color:{accent}; margin-bottom:0.3rem;">'
+                        f'{pdata["name"]} '
+                        f'<span style="color:#6e6e8a; font-size:0.55em; font-weight:400">#{pdata["id"]:04d}</span></h3>',
                         unsafe_allow_html=True
                     )
                     st.markdown("".join(type_badge(t) for t in pdata['types']), unsafe_allow_html=True)
