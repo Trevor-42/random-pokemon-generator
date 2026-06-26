@@ -870,12 +870,30 @@ with main_tab_search:
                             with card_columns[idx % 3]:
                                 if card['image']:
                                     st.image(card['image'], use_container_width=True)
-                                st.markdown(f"**{card['name']}**")
-                                st.caption(f"Set: {card['set']}")
-                                st.caption(f"Rarity: {card['rarity']}")
-                                st.write(f"TCG Market: **${card['price']:.2f}**")
+                                st.markdown(
+                                    f'<p style="font-family:\'Chakra Petch\',sans-serif; font-weight:700; '
+                                    f'font-size:1rem; margin:0.4rem 0 0.2rem; color:#e8e8f0;">{card["name"]}</p>',
+                                    unsafe_allow_html=True)
+                                st.markdown(
+                                    f'<p style="color:#6e6e8a; font-size:0.78rem; margin:0.1rem 0; font-weight:500;">'
+                                    f'Set: <span style="color:#9e9eb8;">{card["set"]}</span></p>',
+                                    unsafe_allow_html=True)
+                                st.markdown(
+                                    f'<p style="color:#6e6e8a; font-size:0.78rem; margin:0.1rem 0; font-weight:500;">'
+                                    f'Rarity: <span style="color:#9e9eb8;">{card["rarity"]}</span></p>',
+                                    unsafe_allow_html=True)
+                                st.markdown(
+                                    f'<p style="font-family:\'Chakra Petch\',sans-serif; font-weight:700; '
+                                    f'font-size:1.3rem; color:#ffc857; margin:0.5rem 0 0.2rem;">'
+                                    f'${card["price"]:.2f}'
+                                    f'<span style="color:#6e6e8a; font-size:0.55em; font-weight:400; '
+                                    f'margin-left:6px; letter-spacing:0.05em;">TCG MARKET</span></p>',
+                                    unsafe_allow_html=True)
                                 if card.get('price_low') and card.get('price_high'):
-                                    st.caption(f"Range: ${card['price_low']:.2f} – ${card['price_high']:.2f}")
+                                    st.markdown(
+                                        f'<p style="color:#44445a; font-size:0.75rem; margin:0;">'
+                                        f'${card["price_low"]:.2f} – ${card["price_high"]:.2f}</p>',
+                                        unsafe_allow_html=True)
 
                                 if SHOW_EBAY:
                                     if ebay_token:
@@ -1193,9 +1211,15 @@ with main_tab_binder:
                         with pick_cols[cidx % 3]:
                             if card['image']:
                                 st.image(card['image'], width=80)
-                            st.caption(f"{card['name']}")
+                            st.markdown(
+                                f'<p style="font-family:\'Chakra Petch\',sans-serif; font-weight:600; '
+                                f'font-size:0.85rem; color:#e8e8f0; margin:0.2rem 0;">{card["name"]}</p>',
+                                unsafe_allow_html=True)
                             st.caption(f"{card['set']}")
-                            st.write(f"**${card['price']:.2f}**")
+                            st.markdown(
+                                f'<p style="font-family:\'Chakra Petch\',sans-serif; font-weight:700; '
+                                f'font-size:1.1rem; color:#ffc857; margin:0.2rem 0;">${card["price"]:.2f}</p>',
+                                unsafe_allow_html=True)
                             if st.button("Select", key=f"pick_{active_id}_{cidx}"):
                                 st.session_state.binder[pid] = {
                                     "card_name": card['name'],
@@ -1437,8 +1461,15 @@ with main_tab_top:
                     if item['image']:
                         st.image(item['image'], use_container_width=True)
                     rank_label = f"#{item['rank']}" if top_sort == "Price ↓" else f"#{item['id']:04d}"
-                    st.caption(f"{rank_label} **{item['pokemon']}**")
-                    st.write(f"**${item['price']:.2f}**")
+                    st.markdown(
+                        f'<p style="font-family:\'Chakra Petch\',sans-serif; font-weight:700; '
+                        f'font-size:0.9rem; color:#e8e8f0; margin:0.3rem 0 0;">{item["pokemon"]}'
+                        f'<span style="color:#44445a; font-size:0.7em; margin-left:5px;">{rank_label}</span></p>',
+                        unsafe_allow_html=True)
+                    st.markdown(
+                        f'<p style="font-family:\'Chakra Petch\',sans-serif; font-weight:700; '
+                        f'font-size:1.2rem; color:#ffc857; margin:0.2rem 0;">${item["price"]:.2f}</p>',
+                        unsafe_allow_html=True)
                     st.caption(item['set'])
                     pid = str(item['id'])
                     if pid in binder:
